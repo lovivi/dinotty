@@ -17,8 +17,8 @@ use tokio::sync::{Mutex as TokioMutex, RwLock};
 use crate::session::SessionManager;
 
 use super::helpers::{
-    copy_dir_all, extract_zip, find_plugin_root, is_safe_segment, plugin_err, set_executable,
-    validate_manifest, version_gt,
+    copy_dir_all, create_symlink_dir, extract_zip, find_plugin_root, is_safe_segment, plugin_err,
+    set_executable, validate_manifest, version_gt,
 };
 use super::manager::PluginManagerState;
 use super::types::{
@@ -447,8 +447,8 @@ pub async fn dev_link_plugin(
     }
 
     std::fs::create_dir_all(&pm.plugin_dir).ok();
-    if let Err(e) = std::os::unix::fs::symlink(&src, &link) {
-        return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+    if let Err(e) = create_symlink_dir(&src, &link) {
+        return plugin_err(StatusCode::INTERNAL_SERVER_ERROR, &e);
     }
 
     pm.registry.insert(

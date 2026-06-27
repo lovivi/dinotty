@@ -22,6 +22,22 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), String> {
     Ok(())
 }
 
+pub fn create_symlink_dir(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(src, dst).map_err(|e| format!("symlink failed: {e}"))
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_dir(src, dst).map_err(|e| format!("symlink failed: {e}"))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (src, dst);
+        Err("dev-link is not supported on this platform".into())
+    }
+}
+
 pub fn set_executable(path: &std::path::Path) -> Result<(), String> {
     #[cfg(unix)]
     {

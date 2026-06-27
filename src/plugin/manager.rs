@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::session::SessionManager;
 
-use super::helpers::{copy_dir_all, extract_tar_gz, set_executable, validate_manifest};
+use super::helpers::{copy_dir_all, create_symlink_dir, extract_tar_gz, set_executable, validate_manifest};
 use super::types::{ManagedProcess, PluginInfo, PluginManifest, PluginStateValue};
 
 // ─── PluginManager ──────────────────────────────────────────────────────────
@@ -253,13 +253,7 @@ impl PluginManager {
 
         if dev_link {
             // Create a symlink from src -> plugin_dir/id
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(src, &dest).map_err(|e| format!("symlink failed: {e}"))?;
-            #[cfg(not(unix))]
-            {
-                let _ = (src, &dest);
-                return Err("dev-link is only supported on Unix".into());
-            }
+            create_symlink_dir(src, &dest)?;
         } else {
             copy_dir_all(src, &dest)?;
         }
