@@ -1,12 +1,21 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
 use crate::event_bus::BusEvent;
 use crate::session::{Session, SessionManager, SessionStatus, SyncMsg};
+use crate::shell_profiles::{ShellProfile, ShellProfileKind};
 use crate::vt_screen::VirtualScreen;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
+
+/// Options for creating a PTY session.
+#[derive(Default)]
+pub struct CreateSessionOptions {
+    pub tauri_on_exit: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    pub cwd: Option<PathBuf>,
+    pub shell_profile: Option<ShellProfile>,
+}
 
 /// Create a new PTY session and register it with the session manager.
 ///
@@ -22,15 +31,43 @@ pub fn create_session(
     tauri_on_exit: Option<Arc<dyn Fn(String) + Send + Sync>>,
     cwd: Option<PathBuf>,
 ) -> Result<(Arc<Session>, String), String> {
+    create_session_with_options(
+        manager,
+        pane_id,
+        CreateSessionOptions { tauri_on_exit, cwd, ..CreateSessionOptions::default() },
+    )
+}
+
+/// Create a new PTY session from structured options.
+///
+/// # Errors
+/// Returns `Err` if the PTY cannot be opened, the shell cannot be spawned,
+/// or the reader/writer cannot be obtained.
+///
+/// # Panics
+/// Panics if the internal mutex is poisoned in the PTY reader task.
+pub fn create_session_with_options(
+    manager: &Arc<SessionManager>,
+    pane_id: &str,
+    options: CreateSessionOptions,
+) -> Result<(Arc<Session>, String), String> {
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
 
-    let shell = get_shell();
-    let shell_type = get_shell_type(&shell);
+    let profile = options.shell_profile.clone();
+    let shell = profile.as_ref().map_or_else(get_shell, |p| p.command.clone());
+    let shell_type = profile
+        .as_ref()
+        .map_or_else(|| get_shell_type(&shell), get_shell_type_for_profile);
     let mut cmd = CommandBuilder::new(&shell);
-    cmd.args(get_shell_args(&shell));
+    if let Some(profile) = profile.as_ref() {
+        let args: Vec<&str> = profile.args.iter().map(String::as_str).collect();
+        cmd.args(args);
+    } else {
+        cmd.args(get_shell_args(&shell));
+    }
     cmd.env("TERM", "xterm-256color");
 
     let home_path = std::env::var("HOME").map_or_else(
@@ -38,7 +75,7 @@ pub fn create_session(
         PathBuf::from,
     );
 
-    let effective_cwd = cwd.filter(|p| p.is_dir()).unwrap_or_else(|| home_path.clone());
+    let effective_cwd = options.cwd.filter(|p| p.is_dir()).unwrap_or_else(|| home_path.clone());
     cmd.cwd(&effective_cwd);
 
     // Shell-specific env setup still uses $HOME (for ZDOTDIR/PROMPT_COMMAND)
@@ -81,11 +118,15 @@ pub fn create_session(
         status: std::sync::Mutex::new(SessionStatus::Connected),
         size: std::sync::Mutex::new((80, 24)),
         shell_type: shell_type.clone(),
-        tauri_on_exit: std::sync::Mutex::new(tauri_on_exit),
+        shell_profile_id: profile.as_ref().map(|p| p.id.clone()),
+        shell_profile_name: profile.as_ref().map(|p| p.name.clone()),
+        tauri_on_exit: std::sync::Mutex::new(options.tauri_on_exit),
         cwd_state: std::sync::Mutex::new(crate::session::CwdState {
             cwd: initial_cwd,
             sniff_buf: Vec::new(),
         }),
+        recent_commands: std::sync::Mutex::new(Vec::new()),
+        input_buffer: std::sync::Mutex::new(String::new()),
     });
     manager.sessions.insert(pane_id.to_string(), Arc::clone(&session));
 
@@ -270,6 +311,16 @@ pub fn get_shell_type(shell: &str) -> String {
         "bash".into()
     } else {
         "sh".into()
+    }
+}
+
+#[must_use]
+pub fn get_shell_type_for_profile(profile: &ShellProfile) -> String {
+    match &profile.kind {
+        ShellProfileKind::Wsl => "wsl".into(),
+        ShellProfileKind::Powershell => "powershell".into(),
+        ShellProfileKind::Cmd => "cmd".into(),
+        ShellProfileKind::Unix | ShellProfileKind::Custom => get_shell_type(&profile.command),
     }
 }
 

@@ -34,12 +34,65 @@ pub struct Session {
     pub size: Mutex<(u16, u16)>,
     #[allow(dead_code)]
     pub shell_type: String,
+    #[allow(dead_code)]
+    pub shell_profile_id: Option<String>,
+    #[allow(dead_code)]
+    pub shell_profile_name: Option<String>,
     #[allow(clippy::type_complexity)]
     pub tauri_on_exit: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
     pub cwd_state: Mutex<CwdState>,
+    pub recent_commands: Mutex<Vec<String>>,
+    pub input_buffer: Mutex<String>,
 }
 
 impl Session {
+    /// Record a command for lightweight worksite restore context.
+    ///
+    /// # Panics
+    /// May panic if the internal mutex is poisoned.
+    pub fn record_command(&self, command: &str) {
+        let command = command.trim().to_string();
+        if command.is_empty() {
+            return;
+        }
+        let mut commands = self.recent_commands.lock().expect("mutex poisoned");
+        commands.push(command);
+        if commands.len() > 100 {
+            let excess = commands.len() - 100;
+            commands.drain(..excess);
+        }
+    }
+
+    /// Process incoming terminal input and record commands on Enter.
+    /// Handles backspace, cancel (Ctrl-C/Ctrl-U), and ignores control chars.
+    /// Returns true if a command was recorded.
+    ///
+    /// # Panics
+    /// May panic if the internal mutex is poisoned.
+    pub fn record_input(&self, data: &str) -> bool {
+        let mut recorded = false;
+        let mut input_buffer = self.input_buffer.lock().expect("mutex poisoned");
+        for ch in data.chars() {
+            if ch == '\r' || ch == '\n' {
+                let cmd = input_buffer.trim().to_string();
+                if !cmd.is_empty() {
+                    drop(input_buffer);
+                    self.record_command(&cmd);
+                    input_buffer = self.input_buffer.lock().expect("mutex poisoned");
+                    recorded = true;
+                }
+                input_buffer.clear();
+            } else if ch == '\x7f' || ch == '\x08' {
+                input_buffer.pop();
+            } else if ch == '\x03' || ch == '\x15' {
+                input_buffer.clear();
+            } else if !ch.is_control() {
+                input_buffer.push(ch);
+            }
+        }
+        recorded
+    }
+
     /// Explicitly kill the child process. Safe to call multiple times (idempotent).
     /// After this, the PTY reader task's `reader.read()` will return Err/Ok(0),
     /// causing it to exit and drop its `Arc<Session>`, which triggers `Drop`.
@@ -418,6 +471,14 @@ pub struct TabInfo {
     pub layout: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_pane_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell_profile_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_roots: Option<Vec<String>>,
 }
 
 impl Default for SessionManager {
@@ -450,6 +511,49 @@ impl SessionManager {
         }
         drop(order);
         self.tab_layouts.insert(tab_id, value);
+    }
+
+    /// Merge layout fields into a tab without dropping unrelated metadata.
+    ///
+    /// # Panics
+    /// May panic if the internal mutex is poisoned.
+    pub fn merge_tab_layout(
+        &self,
+        tab_id: String,
+        layout: serde_json::Value,
+        active_pane_id: Option<String>,
+    ) {
+        let mut value = self
+            .tab_layouts
+            .get(&tab_id)
+            .map_or_else(|| serde_json::json!({}), |entry| entry.value().clone());
+        value["layout"] = layout;
+        match active_pane_id {
+            Some(id) => value["active_pane_id"] = serde_json::Value::String(id),
+            None => {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.remove("active_pane_id");
+                }
+            }
+        }
+        self.insert_tab(tab_id, value);
+    }
+
+    /// Merge arbitrary metadata into a tab without changing layout fields.
+    ///
+    /// # Panics
+    /// May panic if the internal mutex is poisoned.
+    pub fn merge_tab_meta(&self, tab_id: &str, metadata: &serde_json::Value) {
+        let mut value = self
+            .tab_layouts
+            .get(tab_id)
+            .map_or_else(|| serde_json::json!({}), |entry| entry.value().clone());
+        if let (Some(target), Some(source)) = (value.as_object_mut(), metadata.as_object()) {
+            for (key, val) in source {
+                target.insert(key.clone(), val.clone());
+            }
+        }
+        self.insert_tab(tab_id.to_string(), value);
     }
 
     /// Remove a tab layout and its order entry.
@@ -546,9 +650,12 @@ impl SessionManager {
                     let new_leaf_ids = collect_leaf_pane_ids(&new_layout);
                     let active_pane_id =
                         active.filter(|id| new_leaf_ids.iter().any(|lid| lid == *id));
-                    let mut new_val = serde_json::json!({ "layout": new_layout });
+                    let mut new_val = val.clone();
+                    new_val["layout"] = new_layout;
                     if let Some(a) = active_pane_id {
                         new_val["active_pane_id"] = serde_json::Value::String(a.to_string());
+                    } else if let Some(obj) = new_val.as_object_mut() {
+                        obj.remove("active_pane_id");
                     }
                     updates.push((tab_pane_id.clone(), new_val));
                 }
@@ -611,7 +718,29 @@ impl SessionManager {
                     layout.as_ref().and_then(first_leaf_id).unwrap_or_else(|| tab_id.clone());
                 let active_pane_id =
                     v.get("active_pane_id").and_then(|v| v.as_str()).map(String::from);
-                TabInfo { tab_id, pane_id, layout, active_pane_id }
+                let shell_profile_id =
+                    v.get("shell_profile_id").and_then(|v| v.as_str()).map(String::from);
+                let shell_profile_name =
+                    v.get("shell_profile_name").and_then(|v| v.as_str()).map(String::from);
+                let group_id = v.get("group_id").and_then(|v| v.as_str()).map(String::from);
+                let workspace_roots = v.get("workspace_roots").and_then(|v| {
+                    v.as_array().map(|roots| {
+                        roots
+                            .iter()
+                            .filter_map(|root| root.as_str().map(String::from))
+                            .collect::<Vec<_>>()
+                    })
+                });
+                TabInfo {
+                    tab_id,
+                    pane_id,
+                    layout,
+                    active_pane_id,
+                    shell_profile_id,
+                    shell_profile_name,
+                    group_id,
+                    workspace_roots,
+                }
             })
             .collect();
 
@@ -629,6 +758,10 @@ impl SessionManager {
                     pane_id,
                     layout: None,
                     active_pane_id: None,
+                    shell_profile_id: None,
+                    shell_profile_name: None,
+                    group_id: None,
+                    workspace_roots: None,
                 });
             }
         }
@@ -679,13 +812,7 @@ impl SessionManager {
                 .to_string();
             drop(tab_val);
 
-            self.insert_tab(
-                tab_id.clone(),
-                serde_json::json!({
-                    "layout": new_layout.clone(),
-                    "active_pane_id": active_pane_id,
-                }),
-            );
+            self.merge_tab_layout(tab_id.clone(), new_layout.clone(), Some(active_pane_id.clone()));
             self.broadcast_sync(&SyncMsg::LayoutUpdated {
                 pane_id: tab_id,
                 layout: new_layout,

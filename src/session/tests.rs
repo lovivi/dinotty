@@ -12,6 +12,7 @@ fn leaf(id: &str) -> serde_json::Value {
     })
 }
 
+#[allow(clippy::needless_pass_by_value, clippy::cast_precision_loss)]
 fn split(direction: &str, children: Vec<serde_json::Value>) -> serde_json::Value {
     let n = children.len();
     serde_json::json!({
@@ -113,7 +114,7 @@ fn sniff_cwd_extracts_from_bel_terminated_osc() {
     // Use the real temp dir path so canonicalize succeeds
     let tmp = std::env::temp_dir();
     let tmp_str = tmp.to_string_lossy();
-    let data = format!("\x1b]0;user@host:{}\x07", tmp_str);
+    let data = format!("\x1b]0;user@host:{tmp_str}\x07");
     sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd);
     assert_eq!(cwd, tmp.canonicalize().unwrap_or(tmp));
 }
@@ -125,7 +126,7 @@ fn sniff_cwd_extracts_from_st_terminated_osc() {
     let mut buf = Vec::new();
     let tmp = std::env::temp_dir();
     let tmp_str = tmp.to_string_lossy();
-    let data = format!("\x1b]0;user@host:{}\x1b\\", tmp_str);
+    let data = format!("\x1b]0;user@host:{tmp_str}\x1b\\");
     sniff_cwd_from_title_osc(&mut buf, data.as_bytes(), &home, &mut cwd);
     assert_eq!(cwd, tmp.canonicalize().unwrap_or(tmp));
 }
@@ -364,6 +365,76 @@ fn insert_tab_idempotent() {
     // Layout should be updated
     let val = manager.tab_layouts.get("t1").unwrap();
     assert_eq!(val.get("layout").unwrap().get("paneId").unwrap(), "p1-updated");
+}
+
+#[test]
+fn merge_tab_layout_preserves_metadata() {
+    let manager = SessionManager::new();
+    manager.insert_tab(
+        "t1".into(),
+        serde_json::json!({
+            "layout": leaf("p1"),
+            "active_pane_id": "p1",
+            "shell_profile_id": "wsl-default",
+            "shell_profile_name": "WSL",
+            "group_id": "project-1",
+            "workspace_roots": ["/home/song/work/dinotty"],
+        }),
+    );
+
+    manager.merge_tab_layout("t1".into(), leaf("p2"), Some("p2".into()));
+
+    let val = manager.tab_layouts.get("t1").unwrap();
+    assert_eq!(val.get("layout").unwrap().get("paneId").unwrap(), "p2");
+    assert_eq!(val.get("active_pane_id").unwrap(), "p2");
+    assert_eq!(val.get("shell_profile_id").unwrap(), "wsl-default");
+    assert_eq!(val.get("shell_profile_name").unwrap(), "WSL");
+    assert_eq!(val.get("group_id").unwrap(), "project-1");
+    assert_eq!(
+        val.get("workspace_roots").unwrap().as_array().unwrap()[0],
+        "/home/song/work/dinotty"
+    );
+}
+
+#[test]
+fn merge_tab_meta_preserves_layout_and_updates_metadata() {
+    let manager = SessionManager::new();
+    manager.insert_tab(
+        "t1".into(),
+        serde_json::json!({
+            "layout": leaf("p1"),
+            "active_pane_id": "p1",
+            "group_id": "project-1",
+        }),
+    );
+
+    manager.merge_tab_meta("t1", &serde_json::json!({"group_id": "project-2"}));
+
+    let val = manager.tab_layouts.get("t1").unwrap();
+    assert_eq!(val.get("layout").unwrap().get("paneId").unwrap(), "p1");
+    assert_eq!(val.get("active_pane_id").unwrap(), "p1");
+    assert_eq!(val.get("group_id").unwrap(), "project-2");
+}
+
+#[test]
+fn merge_tab_meta_partial_update() {
+    let manager = SessionManager::new();
+    manager.insert_tab(
+        "t1".into(),
+        serde_json::json!({
+            "layout": leaf("p1"),
+            "group_id": "project-1",
+            "workspace_roots": ["/a"],
+        }),
+    );
+
+    manager.merge_tab_meta("t1", &serde_json::json!({"workspace_roots": ["/b"]}));
+
+    let val = manager.tab_layouts.get("t1").unwrap();
+    assert_eq!(val.get("group_id").unwrap(), "project-1");
+    let roots = val.get("workspace_roots").unwrap().as_array().unwrap();
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0], "/b");
 }
 
 #[test]

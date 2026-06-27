@@ -345,7 +345,7 @@ export function useFileOperations(opts: {
   }
   function clearActiveWorkspace() {
     if (_activeUploadFn === uploadFiles) _activeUploadFn = null
-    if (_dragCounterRef === dragCounter) _dragCounterRef = null
+    _dragCounterRef = null
   }
 
   function setHoveredDir(dir: string | undefined) {

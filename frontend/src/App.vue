@@ -12,9 +12,14 @@
       :is-mobile="isMobile"
       :current-tab-title="currentTabTitle"
       :current-tab-index="currentTabIndex"
+      :shell-profiles="shellProfiles"
+      :default-shell-profile-id="defaultShellProfileId"
+      :project-groups="appSettings.project_groups"
+      :active-project-group-id="session.activeProjectGroupId"
       @activate="activateTab"
       @close="requestCloseTab"
       @action="onNewMenuAction"
+      @project-action="onProjectAction"
       @reorder="reorderTab"
       @open-plugin="openPlugin"
       @rename="onRenameTab"
@@ -100,6 +105,18 @@
             "
             @divider-drag-end="onDividerDragEnd(tab)"
           />
+          <div v-if="restoreContextFor(tab.activePaneId)" class="restore-context-card">
+            <div class="restore-context-title">Restored context</div>
+            <div class="restore-context-line">cwd: {{ restoreContextFor(tab.activePaneId)?.cwd ?? 'unknown' }}</div>
+            <div class="restore-context-line">
+              shell: {{ restoreContextFor(tab.activePaneId)?.shell_profile_name ?? restoreContextFor(tab.activePaneId)?.shell_profile_id ?? 'default' }}
+            </div>
+            <div v-if="restoreContextFor(tab.activePaneId)?.recent_commands?.length" class="restore-context-line">
+              recent: {{ restoreContextFor(tab.activePaneId)?.recent_commands.slice(-3).join(' · ') }}
+            </div>
+            <pre v-if="restoreContextFor(tab.activePaneId)?.output_tail?.length" class="restore-context-tail">{{ restoreContextFor(tab.activePaneId)?.output_tail.slice(-6).join('\n') }}</pre>
+            <button type="button" class="restore-context-dismiss" @click="dismissRestoreContext(tab.activePaneId)">Dismiss</button>
+          </div>
           <PreviewPanel
             v-if="tab.paneId === activePaneId"
             :ref="setPreviewPanelRef"
@@ -240,7 +257,11 @@ import {
   apiClosePane,
   apiActivatePane,
   apiListTabs,
+  apiListShellProfiles,
+  apiGetRestoreState,
+  apiUpdateTabMeta,
 } from './composables/useTabApi'
+import type { ShellProfile, RestoredPane } from './composables/useTabApi'
 import { Settings, Bell, Monitor, Plus, X, Star, AppWindow, Radar } from 'lucide-vue-next'
 import TabOverview from './components/overview/TabOverview.vue'
 import type { TabCard } from './composables/useTabPreview'
@@ -253,6 +274,8 @@ import { storeToRefs } from 'pinia'
 import { useSessionStore } from './stores/sessionStore'
 import { useUiStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
+
+import type { ProjectGroup } from './composables/useSettings'
 
 // ── Stores ──────────────────────────────────────────────────────
 const session = useSessionStore()
@@ -284,6 +307,38 @@ const notif = useNotification()
 const { loadedPlugins, loadAll, getPluginContext, pluginList, allCommands } = usePluginLoader()
 const { isMobile } = useIsMobile()
 const tabPreview = useTabPreview()
+const shellProfiles = ref<ShellProfile[]>([])
+const defaultShellProfileId = ref<string | null>(null)
+const restoreContexts = ref<Record<string, RestoredPane>>({})
+
+function restoreContextFor(paneId: string): RestoredPane | null {
+  return restoreContexts.value[paneId] ?? null
+}
+
+function dismissRestoreContext(paneId: string) {
+  const next = { ...restoreContexts.value }
+  delete next[paneId]
+  restoreContexts.value = next
+}
+
+async function loadRestoreContexts() {
+  try {
+    const state = await apiGetRestoreState()
+    restoreContexts.value = Object.fromEntries(state.panes.map((pane) => [pane.pane_id, pane]))
+  } catch (e) {
+    console.warn('Failed to load restore context:', e)
+  }
+}
+
+async function loadShellProfiles() {
+  try {
+    const data = await apiListShellProfiles()
+    shellProfiles.value = data.profiles
+    defaultShellProfileId.value = data.default_profile_id ?? null
+  } catch (e) {
+    console.warn('Failed to load shell profiles:', e)
+  }
+}
 
 const isLandscape = ref(window.innerWidth > window.innerHeight)
 
@@ -464,6 +519,11 @@ function persistNow() {
         previewUrl: t.previewUrl,
         previewKind: t.previewKind,
         customTitle: t.customTitle,
+        shellProfileId: t.shellProfileId,
+        shellProfileName: t.shellProfileName,
+        groupId: t.groupId ?? null,
+        workspaceRoots: t.workspaceRoots ?? [],
+        restoreContext: t.restoreContext,
       }
     }
     return {
@@ -494,9 +554,15 @@ window.addEventListener('beforeunload', (e) => {
 
 const DEFAULT_PREVIEW_URL = ''
 
-async function newTab() {
+async function newTab(profileId?: string) {
   try {
-    const result = await apiCreateTab()
+    const activeGroupId = session.activeProjectGroupId
+    const group = appSettings.project_groups.find((g) => g.id === activeGroupId)
+    const result = await apiCreateTab({
+      ...(profileId ? { profile_id: profileId } : {}),
+      group_id: activeGroupId,
+      workspace_roots: group?.workspace_roots ?? [],
+    })
     // Dedup: broadcast_sync echoes back to sender — tab_created handler may
     // have already added this tab if the sync message arrived before the
     // REST response.
@@ -518,6 +584,10 @@ async function newTab() {
       previewAddress: '',
       previewUrl: '',
       previewKind: 'web',
+      shellProfileId: result.shell_profile_id,
+      shellProfileName: result.shell_profile_name,
+      groupId: result.group_id ?? null,
+      workspaceRoots: result.workspace_roots ?? [],
     })
     activePaneId.value = result.tab_id
     persist()
@@ -527,8 +597,19 @@ async function newTab() {
   }
 }
 
-function onNewMenuAction(type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast') {
-  switch (type) {
+type NewMenuAction =
+  | 'new-tab'
+  | 'split-h'
+  | 'split-v'
+  | 'broadcast'
+  | { type: 'new-tab-profile'; profileId: string }
+
+function onNewMenuAction(action: NewMenuAction) {
+  if (typeof action !== 'string') {
+    if (action.type === 'new-tab-profile') return newTab(action.profileId)
+    return
+  }
+  switch (action) {
     case 'new-tab':
       return newTab()
     case 'split-h':
@@ -537,6 +618,54 @@ function onNewMenuAction(type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast') 
       return splitPane.splitPane('vertical')
     case 'broadcast':
       return splitPane.toggleBroadcast()
+  }
+}
+
+type ProjectAction =
+  | { type: 'select'; groupId: string | null }
+  | { type: 'create' }
+  | { type: 'move-active'; groupId: string | null }
+
+async function onProjectAction(action: ProjectAction) {
+  if (action.type === 'select') {
+    session.setActiveProjectGroup(action.groupId)
+    return
+  }
+  if (action.type === 'create') {
+    const name = window.prompt('Project name')?.trim()
+    if (!name) return
+    const now = Date.now()
+    const group: ProjectGroup = {
+      id: `project-${now}`,
+      name,
+      color: null,
+      workspace_roots: [],
+      created_at: now,
+      updated_at: now,
+      sort_order: appSettings.project_groups.length,
+      archived: false,
+    }
+    appSettings.project_groups.push(group)
+    appSettings.default_project_group_id ??= group.id
+    session.setActiveProjectGroup(group.id)
+    await settingsStore.save()
+    return
+  }
+  if (action.type === 'move-active') {
+    if (!activePaneId.value) return
+    session.moveTabToProjectGroup(activePaneId.value, action.groupId)
+    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
+    if (tab?.type === 'terminal') {
+      try {
+        await apiUpdateTabMeta(tab.paneId, {
+          group_id: action.groupId,
+          workspace_roots: tab.workspaceRoots ?? [],
+        })
+      } catch (e) {
+        console.error('Failed to sync tab meta:', e)
+      }
+    }
+    persist()
   }
 }
 
@@ -673,7 +802,7 @@ function focusActive() {
   if (!activePaneId.value) return
   const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
   if (!tab) return
-  if (tab.type === 'terminal') {
+  if (tab.type === 'terminal' && tab.layout) {
     const paneId = tab.activePaneId
     if (!(isTouchDevice() && kbVisible.value)) {
       // Blur all other panes first to prevent duplicate input in Tauri WKWebView
@@ -768,6 +897,8 @@ async function onLoginSuccess() {
   ui.setAuthenticated(true)
   await getApiBase()
   await settingsStore.load()
+  await loadShellProfiles()
+  await loadRestoreContexts()
   void loadAll()
   void syncWs.connectSyncWS()
   initMonitorHistory()
@@ -1116,6 +1247,8 @@ onMounted(async () => {
   }
   if (authenticated.value) {
     await getApiBase()
+    await loadShellProfiles()
+    await loadRestoreContexts()
     void syncWs.connectSyncWS()
     initMonitorHistory()
     void loadAll()
@@ -1146,6 +1279,10 @@ onMounted(async () => {
               previewAddress: '',
               previewUrl: '',
               previewKind: 'web',
+              shellProfileId: tab.shell_profile_id,
+              shellProfileName: tab.shell_profile_name,
+              groupId: tab.group_id ?? null,
+              workspaceRoots: tab.workspace_roots ?? [],
             })
           }
           if (data.active_pane_id) {
@@ -1280,5 +1417,43 @@ onBeforeUnmount(() => {
   text-align: center;
   padding: 0 3px;
   pointer-events: none;
+}
+.restore-context-card {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 20;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 12px;
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface, #1e1e1e) 94%, transparent);
+  color: var(--text, #ddd);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+.restore-context-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.restore-context-line {
+  color: var(--text-muted, #aaa);
+  margin: 2px 0;
+}
+.restore-context-tail {
+  max-height: 120px;
+  overflow: auto;
+  margin: 8px 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  white-space: pre-wrap;
+}
+.restore-context-dismiss {
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+  background: var(--bg-hover, #2a2a2a);
+  color: inherit;
+  padding: 4px 8px;
 }
 </style>

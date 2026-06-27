@@ -169,6 +169,35 @@
         {{ t('settings.confirmBeforeCloseTabHint') }}
       </p>
     </section>
+
+    <section class="settings-section">
+      <h3>{{ t('settings.restore.title') }}</h3>
+      <div class="settings-row">
+        <label>{{ t('settings.restore.enabled') }}</label>
+        <label class="toggle">
+          <input type="checkbox" v-model="settings.restore.enabled" @change="saveSettings()" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <p class="settings-hint">{{ t('settings.restore.enabledHint') }}</p>
+      <div class="settings-row">
+        <label>{{ t('settings.restore.persistOutputTails') }}</label>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            v-model="settings.restore.persist_output_tails"
+            @change="saveSettings()"
+          />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <p class="settings-hint">{{ t('settings.restore.persistOutputTailsHint') }}</p>
+      <div class="settings-row">
+        <button type="button" class="icon-btn danger" @click="clearRestoreHistory">
+          {{ t('settings.restore.clearHistory') }}
+        </button>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -187,6 +216,7 @@ import {
   getApiBase,
   fetchServerToken,
 } from '../../composables/apiBase'
+import { apiClearRestoreState } from '../../composables/useTabApi'
 
 const { settings, saveSettings } = useSettings()
 const { t } = useI18n()
@@ -337,6 +367,15 @@ function addIp() {
 
 function removeIp(idx: number) {
   settings.ip_whitelist.splice(idx, 1)
+}
+
+async function clearRestoreHistory() {
+  if (!confirm(t('settings.restore.clearHistoryConfirm'))) return
+  try {
+    await apiClearRestoreState()
+  } catch (e) {
+    console.error('Failed to clear restore history:', e)
+  }
 }
 </script>
 

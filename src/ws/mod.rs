@@ -17,6 +17,7 @@ use tracing::{error, info};
 
 use crate::history::HistoryState;
 use crate::notification::NotificationBroadcast;
+use crate::restore_state;
 use crate::session::{SessionManager, SessionStatus, SyncMsg};
 use crate::settings::SettingsState;
 
@@ -178,6 +179,7 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                     "active_pane_id": leaf_id,
                                 }),
                             );
+                            restore_state::save_state(&manager);
                             // Reply to the sender with server-generated IDs
                             let _ = msg_tx.send(
                                 serde_json::to_string(&SyncMsg::TabCreated {
@@ -212,6 +214,7 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                             manager.remove_tab(&pane_id);
                             // Remove stale pane_id from any parent tab layouts
                             manager.purge_pane_from_layouts(&pane_id);
+                            restore_state::save_state(&manager);
                             manager
                                 .broadcast_sync_others(&SyncMsg::TabClosed { pane_id }, &client_id);
                         }
@@ -224,6 +227,7 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                 .map(|e| (e.key().clone(), e.value().clone()))
                                 .collect();
                             let emptied_tabs = manager.purge_pane_from_layouts(&pane_id);
+                            restore_state::save_state(&manager);
                             // Broadcast layout changes to other clients
                             for (tab_id, old_val) in &before_layouts {
                                 if let Some(new_val) = manager.tab_layouts.get(tab_id) {
@@ -259,13 +263,12 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                             }
                         }
                         SyncClientMsg::UpdateLayout { pane_id, layout, active_pane_id } => {
-                            manager.insert_tab(
+                            manager.merge_tab_layout(
                                 pane_id.clone(),
-                                serde_json::json!({
-                                    "layout": layout,
-                                    "active_pane_id": active_pane_id,
-                                }),
+                                layout.clone(),
+                                Some(active_pane_id.clone()),
                             );
+                            restore_state::save_state(&manager);
                             manager.broadcast_sync_others(
                                 &SyncMsg::LayoutUpdated { pane_id, layout, active_pane_id },
                                 &client_id,
@@ -294,7 +297,6 @@ async fn handle_socket(
 ) {
     info!("WebSocket connected: pane={}", pane_id);
     let (ws_tx, mut ws_rx) = socket.split();
-    let mut input_buffer = String::new();
 
     // Channel for all outbound WS messages (PTY output, Ping, Pong)
     let (ws_out_tx, mut ws_out_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
@@ -404,24 +406,14 @@ async fn handle_socket(
             match msg {
                 Message::Text(text) => match serde_json::from_str::<ClientMsg>(&text) {
                     Ok(ClientMsg::Input { data }) => {
-                        for ch in data.chars() {
-                            if ch == '\r' || ch == '\n' {
-                                let cmd = input_buffer.trim().to_string();
-                                if !cmd.is_empty() {
-                                    let h = history.clone();
-                                    tokio::spawn(async move {
-                                        h.push_realtime(&cmd).await;
-                                    });
-                                }
-                                input_buffer.clear();
-                            } else if ch == '\x7f' || ch == '\x08' {
-                                input_buffer.pop();
-                            } else if ch == '\x03' || ch == '\x15' {
-                                input_buffer.clear();
-                            } else if !ch.is_control() {
-                                input_buffer.push(ch);
-                            }
+                        if session.record_input(&data) {
+                            restore_state::save_state(&manager);
                         }
+                        let h = history.clone();
+                        let data_for_history = data.clone();
+                        tokio::spawn(async move {
+                            h.push_realtime(&data_for_history).await;
+                        });
                         let tx = session.input_tx.lock().expect("mutex poisoned");
                         if let Some(tx) = tx.as_ref() {
                             let _ = tx.send(data);
@@ -508,24 +500,14 @@ async fn handle_socket(
         match msg {
             Message::Text(text) => match serde_json::from_str::<ClientMsg>(&text) {
                 Ok(ClientMsg::Input { data }) => {
-                    for ch in data.chars() {
-                        if ch == '\r' || ch == '\n' {
-                            let cmd = input_buffer.trim().to_string();
-                            if !cmd.is_empty() {
-                                let h = history.clone();
-                                tokio::spawn(async move {
-                                    h.push_realtime(&cmd).await;
-                                });
-                            }
-                            input_buffer.clear();
-                        } else if ch == '\x7f' || ch == '\x08' {
-                            input_buffer.pop();
-                        } else if ch == '\x03' || ch == '\x15' {
-                            input_buffer.clear();
-                        } else if !ch.is_control() {
-                            input_buffer.push(ch);
-                        }
+                    if session.record_input(&data) {
+                        restore_state::save_state(&manager);
                     }
+                    let h = history.clone();
+                    let data_for_history = data.clone();
+                    tokio::spawn(async move {
+                        h.push_realtime(&data_for_history).await;
+                    });
                     let tx = session.input_tx.lock().expect("mutex poisoned");
                     if let Some(tx) = tx.as_ref() {
                         let _ = tx.send(data);
@@ -672,6 +654,10 @@ pub async fn post_input(
         Some(session) => {
             let mut w = session.writer.lock().expect("mutex poisoned");
             let _ = w.write_all(req.data.as_bytes());
+            drop(w);
+            if session.record_input(&req.data) {
+                restore_state::save_state(&manager);
+            }
             (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
         }
         None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "pane not found" }))),

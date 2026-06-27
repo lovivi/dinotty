@@ -130,6 +130,11 @@ export function useSyncWebSocket(opts: {
               previewUrl: migrated?.previewUrl ?? '',
               previewKind: migrated?.previewKind ?? 'web',
               customTitle: migrated?.customTitle,
+              shellProfileId: tab.shell_profile_id ?? migrated?.shellProfileId,
+              shellProfileName: tab.shell_profile_name ?? migrated?.shellProfileName,
+              groupId: tab.group_id ?? migrated?.groupId ?? null,
+              workspaceRoots: tab.workspace_roots ?? migrated?.workspaceRoots ?? [],
+              restoreContext: migrated?.restoreContext,
             })
           }
         }
@@ -221,6 +226,8 @@ export function useSyncWebSocket(opts: {
             previewAddress: '',
             previewUrl: '',
             previewKind: 'web',
+            groupId: null,
+            workspaceRoots: [],
           })
           activePaneId.value = msg.tab_id
           persist()

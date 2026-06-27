@@ -39,6 +39,28 @@ export interface SettingsData {
   auth_token?: string
   ip_whitelist: string[]
   keybindings: Record<string, { key: string; shift: boolean }>
+  default_shell_profile_id?: string | null
+  project_groups: ProjectGroup[]
+  default_project_group_id?: string | null
+  restore: RestoreConfig
+}
+
+export interface RestoreConfig {
+  enabled: boolean
+  persist_output_tails: boolean
+  max_commands_per_pane: number
+  max_output_tail_lines: number
+}
+
+export interface ProjectGroup {
+  id: string
+  name: string
+  color?: string | null
+  workspace_roots: string[]
+  created_at: number
+  updated_at: number
+  sort_order: number
+  archived: boolean
 }
 
 export interface OpenApiConfig {
@@ -212,6 +234,15 @@ export const settings = reactive<SettingsData>({
   },
   ip_whitelist: ['127.0.0.1', '::1'],
   keybindings: {},
+  default_shell_profile_id: null,
+  project_groups: [],
+  default_project_group_id: null,
+  restore: {
+    enabled: true,
+    persist_output_tails: true,
+    max_commands_per_pane: 20,
+    max_output_tail_lines: 80,
+  },
 })
 
 let loaded = false

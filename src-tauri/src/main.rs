@@ -1,5 +1,6 @@
 use base64::Engine;
 use dinotty_server::pty;
+use dinotty_server::restore_state;
 use dinotty_server::session::{SessionManager, SessionStatus, SyncMsg};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -94,6 +95,9 @@ fn pty_write(
     use std::io::Write;
     let sessions = &state.sessions;
     let session = sessions.get(&pane_id).ok_or("session not found")?;
+    if session.record_input(&data) {
+        restore_state::save_state(state.inner());
+    }
     let mut w = session.writer.lock().unwrap();
     w.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
     Ok(())

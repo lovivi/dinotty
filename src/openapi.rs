@@ -11,6 +11,7 @@ use axum::{
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
+use crate::restore_state;
 use crate::session::SessionManager;
 use crate::settings::Settings;
 
@@ -197,6 +198,10 @@ pub async fn session_input(
             Json(serde_json::json!({ "error": "write failed" })),
         )
             .into_response();
+    }
+    drop(w);
+    if session.record_input(&req.data) {
+        restore_state::save_state(&manager);
     }
 
     Json(serde_json::json!({ "ok": true })).into_response()

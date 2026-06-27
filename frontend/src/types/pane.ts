@@ -36,6 +36,11 @@ export interface TerminalTab {
   previewUrl: string
   previewKind: 'web' | 'files'
   customTitle?: string // User-set tab title (overrides shell title)
+  shellProfileId?: string
+  shellProfileName?: string
+  groupId?: string | null
+  workspaceRoots?: string[]
+  restoreContext?: unknown
 }
 
 /** Plugin tab (unchanged) */
@@ -68,9 +73,20 @@ export function migrateTab(raw: any): TerminalTab {
       previewAddress: raw.previewAddress ?? '',
       previewUrl: raw.previewUrl ?? '',
       previewKind: raw.previewKind ?? 'web',
+      customTitle: raw.customTitle,
+      shellProfileId: raw.shellProfileId,
+      shellProfileName: raw.shellProfileName,
+      groupId: raw.groupId ?? null,
+      workspaceRoots: raw.workspaceRoots ?? [],
+      restoreContext: raw.restoreContext,
     }
   }
-  return raw as TerminalTab
+  return {
+    ...(raw as TerminalTab),
+    groupId: raw.groupId ?? null,
+    workspaceRoots: raw.workspaceRoots ?? [],
+    restoreContext: raw.restoreContext,
+  }
 }
 
 /** Find a leaf node by paneId in the layout tree */

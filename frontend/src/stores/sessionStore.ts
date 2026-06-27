@@ -9,6 +9,7 @@ export const useSessionStore = defineStore('session', () => {
 
   const tabs = ref<Tab[]>([])
   const activePaneId = ref<string | null>(null)
+  const activeProjectGroupId = ref<string | null>(null)
 
   // ── Getters ────────────────────────────────────────────
 
@@ -120,6 +121,16 @@ export const useSessionStore = defineStore('session', () => {
     tab.customTitle = title || undefined
   }
 
+  function setActiveProjectGroup(groupId: string | null) {
+    activeProjectGroupId.value = groupId
+  }
+
+  function moveTabToProjectGroup(tabId: string, groupId: string | null) {
+    const tab = tabs.value.find((t) => t.paneId === tabId)
+    if (!tab || tab.type !== 'terminal') return
+    tab.groupId = groupId
+  }
+
   /** Replace the entire tabs array (used during sync restore) */
   function setTabs(newTabs: Tab[]) {
     tabs.value = newTabs
@@ -129,6 +140,7 @@ export const useSessionStore = defineStore('session', () => {
     // State
     tabs,
     activePaneId,
+    activeProjectGroupId,
 
     // Getters
     activeTab,
@@ -146,6 +158,8 @@ export const useSessionStore = defineStore('session', () => {
     getActiveTerminal,
     reorderTab,
     renameTab,
+    setActiveProjectGroup,
+    moveTabToProjectGroup,
     setTabs,
   }
 })

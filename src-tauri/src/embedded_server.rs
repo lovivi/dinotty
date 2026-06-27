@@ -24,8 +24,10 @@ use dinotty_server::notification::{self, NotificationBroadcast};
 use dinotty_server::plugin::{self, PluginManager, PluginManagerState};
 use dinotty_server::proxy;
 use dinotty_server::qr_code;
+use dinotty_server::restore_state;
 use dinotty_server::session::SessionManager;
 use dinotty_server::settings;
+use dinotty_server::shell_profiles;
 use dinotty_server::tabs;
 use dinotty_server::workspace;
 use dinotty_server::ws;
@@ -275,6 +277,8 @@ async fn generate_qr_code(AxumState(state): AxumState<AppState>) -> impl IntoRes
 }
 
 pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
+    restore_state::restore(&manager);
+
     let monitor_state = MonitorState::new();
     monitor_state.clone().start_collector();
 
@@ -328,6 +332,12 @@ pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
         .route("/api/tabs/:tab_id/pane/:pane_id", delete(tabs::close_pane))
         .route("/api/tabs/:tab_id/pane/:pane_id/activate", put(tabs::activate_pane))
         .route("/api/tabs/:tab_id/layout", put(tabs::update_layout))
+        .route("/api/tabs/:tab_id/meta", put(tabs::update_tab_meta))
+        .route("/api/shell/profiles", get(shell_profiles::list_profiles))
+        .route(
+            "/api/restore-state",
+            get(restore_state::get_restore_state).delete(restore_state::delete_restore_state),
+        )
         .route("/api/input", post(ws::post_input))
         .route("/api/settings", get(settings::get_settings).put(settings::put_settings))
         .route(

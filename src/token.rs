@@ -547,7 +547,7 @@ mod tests {
     fn test_create_and_validate() {
         let mgr = make_manager();
         let caps: HashSet<String> =
-            ["terminal:read", "terminal:write"].iter().map(|s| s.to_string()).collect();
+            ["terminal:read", "terminal:write"].iter().map(std::string::ToString::to_string).collect();
         let (raw, token) =
             mgr.create("test".into(), "desc".into(), caps, HashMap::new(), None).unwrap();
         assert!(raw.starts_with("dnt_"));
@@ -573,9 +573,9 @@ mod tests {
     #[test]
     fn test_revoke() {
         let mgr = make_manager();
-        let caps: HashSet<String> = ["terminal:read"].iter().map(|s| s.to_string()).collect();
+        let caps: HashSet<String> = ["terminal:read"].iter().map(std::string::ToString::to_string).collect();
         let (raw, token) =
-            mgr.create("test".into(), "".into(), caps, HashMap::new(), None).unwrap();
+            mgr.create("test".into(), String::new(), caps, HashMap::new(), None).unwrap();
         assert!(mgr.validate(&raw).is_some());
 
         mgr.revoke(&token.id).unwrap();
@@ -585,10 +585,10 @@ mod tests {
     #[test]
     fn test_expiration() {
         let mgr = make_manager();
-        let caps: HashSet<String> = ["terminal:read"].iter().map(|s| s.to_string()).collect();
+        let caps: HashSet<String> = ["terminal:read"].iter().map(std::string::ToString::to_string).collect();
         // expires_in=1 so it expires 1 second from now, then manually set to past
         let (raw, mut token) =
-            mgr.create("test".into(), "".into(), caps, HashMap::new(), Some(1)).unwrap();
+            mgr.create("test".into(), String::new(), caps, HashMap::new(), Some(1)).unwrap();
         // Manually set to past
         token.expires_at = Some(now_unix() - 10);
         mgr.tokens.insert(token.id.clone(), token);
@@ -598,10 +598,10 @@ mod tests {
     #[test]
     fn test_update() {
         let mgr = make_manager();
-        let caps: HashSet<String> = ["terminal:read"].iter().map(|s| s.to_string()).collect();
-        let (_, token) = mgr.create("test".into(), "".into(), caps, HashMap::new(), None).unwrap();
+        let caps: HashSet<String> = ["terminal:read"].iter().map(std::string::ToString::to_string).collect();
+        let (_, token) = mgr.create("test".into(), String::new(), caps, HashMap::new(), None).unwrap();
 
-        let new_caps: HashSet<String> = ["workspace:read"].iter().map(|s| s.to_string()).collect();
+        let new_caps: HashSet<String> = ["workspace:read"].iter().map(std::string::ToString::to_string).collect();
         let updated = mgr.update(&token.id, Some("updated".into()), Some(new_caps), None).unwrap();
         assert_eq!(updated.name, "updated");
         assert!(updated.capabilities.contains("workspace:read"));
@@ -613,7 +613,7 @@ mod tests {
         let mut info = TokenInfo {
             token_id: "test".into(),
             is_global: false,
-            capabilities: ["terminal:write"].iter().map(|s| s.to_string()).collect(),
+            capabilities: ["terminal:write"].iter().map(std::string::ToString::to_string).collect(),
             scopes: HashMap::new(),
         };
         // No scope restriction = allowed

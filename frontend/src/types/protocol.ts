@@ -30,9 +30,20 @@ export interface ReconnectedMsg {
 export type ServerMsg = OutputMsg | ShellInfoMsg | ReconnectedMsg
 
 // Sync WS messages
+export interface SyncTabInfo {
+  tab_id: string
+  pane_id: string
+  layout?: any
+  active_pane_id?: string
+  shell_profile_id?: string
+  shell_profile_name?: string
+  group_id?: string | null
+  workspace_roots?: string[]
+}
+
 export interface SyncTabList {
   type: 'tab_list'
-  tabs: { tab_id: string; pane_id: string; layout?: any; active_pane_id?: string }[]
+  tabs: SyncTabInfo[]
   active_pane_id: string | null
 }
 

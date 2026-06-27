@@ -2,7 +2,7 @@
 
 use dinotty_server::{
     agent, audit, auth, file_watcher, history, mcp, monitor, notification, openapi, plugin, proxy,
-    qr_code, session, settings, tabs, token, webhook, workspace, ws,
+    qr_code, restore_state, session, settings, shell_profiles, tabs, token, webhook, workspace, ws,
 };
 
 use axum::{
@@ -340,6 +340,7 @@ async fn main() {
 
     let port = parse_port();
     let manager = Arc::new(SessionManager::new());
+    restore_state::restore(&manager);
     manager.start_cleanup_task();
 
     let monitor_state = MonitorState::new();
@@ -439,6 +440,12 @@ async fn main() {
             .route("/api/tabs/:tab_id/pane/:pane_id", delete(tabs::close_pane))
             .route("/api/tabs/:tab_id/pane/:pane_id/activate", put(tabs::activate_pane))
             .route("/api/tabs/:tab_id/layout", put(tabs::update_layout))
+            .route("/api/tabs/:tab_id/meta", put(tabs::update_tab_meta))
+            .route("/api/shell/profiles", get(shell_profiles::list_profiles))
+            .route(
+                "/api/restore-state",
+                get(restore_state::get_restore_state).delete(restore_state::delete_restore_state),
+            )
             .route("/api/auth", post(check_auth))
             .route("/api/token-configured", get(token_configured))
             .route("/api/settings", get(settings::get_settings).put(settings::put_settings))

@@ -56,6 +56,45 @@ pub struct Settings {
     pub ip_whitelist: Vec<String>,
     #[serde(default)]
     pub keybindings: std::collections::HashMap<String, KeyBinding>,
+    #[serde(default)]
+    pub default_shell_profile_id: Option<String>,
+    #[serde(default)]
+    pub project_groups: Vec<ProjectGroup>,
+    #[serde(default)]
+    pub default_project_group_id: Option<String>,
+    #[serde(default)]
+    pub restore: RestoreConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RestoreConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub persist_output_tails: bool,
+    #[serde(default = "default_max_commands_per_pane")]
+    pub max_commands_per_pane: usize,
+    #[serde(default = "default_max_output_tail_lines")]
+    pub max_output_tail_lines: usize,
+}
+
+impl Default for RestoreConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            persist_output_tails: true,
+            max_commands_per_pane: 20,
+            max_output_tail_lines: 80,
+        }
+    }
+}
+
+fn default_max_commands_per_pane() -> usize {
+    20
+}
+
+fn default_max_output_tail_lines() -> usize {
+    80
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -388,6 +427,24 @@ impl Default for BackgroundConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProjectGroup {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub workspace_roots: Vec<String>,
+    #[serde(default)]
+    pub created_at: u64,
+    #[serde(default)]
+    pub updated_at: u64,
+    #[serde(default)]
+    pub sort_order: i32,
+    #[serde(default)]
+    pub archived: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CommandBookmark {
     pub id: String,
     pub name: String,
@@ -466,6 +523,10 @@ impl Default for Settings {
             auth_token: String::new(),
             ip_whitelist: default_ip_whitelist(),
             keybindings: std::collections::HashMap::new(),
+            default_shell_profile_id: None,
+            project_groups: vec![],
+            default_project_group_id: None,
+            restore: RestoreConfig::default(),
         }
     }
 }

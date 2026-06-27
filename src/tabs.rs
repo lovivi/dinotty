@@ -8,21 +8,43 @@ use axum::{
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::pty;
+use crate::pty::{self, CreateSessionOptions};
+use crate::restore_state;
 use crate::session::{self, SessionManager, SyncMsg};
+use crate::shell_profiles;
 
 // ─── Request/Response types ────────────────────────────────────────
+
+#[derive(Deserialize, Default)]
+pub struct CreateTabRequest {
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub workspace_roots: Vec<String>,
+}
 
 #[derive(Deserialize)]
 pub struct SplitPaneRequest {
     pub pane_id: String,
     pub direction: String, // "horizontal" or "vertical"
+    #[serde(default)]
+    pub profile_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct UpdateLayoutRequest {
     pub layout: serde_json::Value,
     pub active_pane_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTabMetaRequest {
+    #[serde(default)]
+    pub group_id: Option<Option<String>>,
+    #[serde(default)]
+    pub workspace_roots: Option<Vec<String>>,
 }
 
 // ─── GET /api/tabs ─────────────────────────────────────────────────
@@ -41,12 +63,26 @@ pub async fn list_tabs(State(manager): State<Arc<SessionManager>>) -> impl IntoR
 /// # Panics
 /// Panics if the internal mutex is poisoned.
 #[allow(clippy::unused_async)]
-pub async fn create_tab(State(manager): State<Arc<SessionManager>>) -> impl IntoResponse {
+pub async fn create_tab(
+    State(manager): State<Arc<SessionManager>>,
+    body: Option<Json<CreateTabRequest>>,
+) -> impl IntoResponse {
+    let req = body.map_or_else(CreateTabRequest::default, |Json(req)| req);
     let tab_id = uuid::Uuid::new_v4().to_string();
     let pane_id = uuid::Uuid::new_v4().to_string();
 
+    let shell_profile = shell_profiles::find_profile(req.profile_id.as_deref());
+    let shell_profile_id = shell_profile.as_ref().map(|profile| profile.id.clone());
+    let shell_profile_name = shell_profile.as_ref().map(|profile| profile.name.clone());
+    let group_id = req.group_id.clone();
+    let workspace_roots = req.workspace_roots.clone();
+
     // Create PTY session
-    let (_session, _shell_type) = match pty::create_session(&manager, &pane_id, None, None) {
+    let (_session, _shell_type) = match pty::create_session_with_options(
+        &manager,
+        &pane_id,
+        CreateSessionOptions { shell_profile, ..CreateSessionOptions::default() },
+    ) {
         Ok(x) => x,
         Err(e) => {
             tracing::error!("Failed to create PTY: {}", e);
@@ -70,11 +106,16 @@ pub async fn create_tab(State(manager): State<Arc<SessionManager>>) -> impl Into
         serde_json::json!({
             "layout": layout,
             "active_pane_id": pane_id,
+            "shell_profile_id": shell_profile_id.clone(),
+            "shell_profile_name": shell_profile_name.clone(),
+            "group_id": group_id.clone(),
+            "workspace_roots": workspace_roots.clone(),
         }),
     );
 
     // Set as active tab
     *manager.active_pane_id.lock().expect("mutex poisoned") = Some(pane_id.clone());
+    restore_state::save_state(&manager);
 
     // Broadcast to all sync clients
     manager.broadcast_sync(&SyncMsg::TabCreated {
@@ -87,6 +128,10 @@ pub async fn create_tab(State(manager): State<Arc<SessionManager>>) -> impl Into
         "tab_id": tab_id,
         "pane_id": pane_id,
         "layout": layout,
+        "shell_profile_id": shell_profile_id,
+        "shell_profile_name": shell_profile_name,
+        "group_id": group_id,
+        "workspace_roots": workspace_roots,
     }))
     .into_response()
 }
@@ -113,6 +158,7 @@ pub async fn close_tab(
 
     // Remove tab
     manager.remove_tab(&tab_id);
+    restore_state::save_state(&manager);
 
     // Broadcast to all sync clients
     manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
@@ -160,15 +206,24 @@ pub async fn split_pane(
 
     let new_pane_id = uuid::Uuid::new_v4().to_string();
 
-    // Inherit CWD from source pane
-    let source_cwd = manager
-        .sessions
-        .get(&req.pane_id)
+    let source_session = manager.sessions.get(&req.pane_id).map(|s| Arc::clone(s.value()));
+    let source_cwd = source_session
+        .as_ref()
         .and_then(|s| s.cwd_state.lock().ok().map(|state| state.cwd.clone()));
+    let shell_profile = shell_profiles::find_profile(
+        req.profile_id.as_deref().or_else(|| {
+            source_session
+                .as_ref()
+                .and_then(|session| session.shell_profile_id.as_deref())
+        }),
+    );
 
     // Create PTY for new pane
-    let (_session, _shell_type) =
-        match pty::create_session(&manager, &new_pane_id, None, source_cwd) {
+    let (_session, _shell_type) = match pty::create_session_with_options(
+        &manager,
+        &new_pane_id,
+        CreateSessionOptions { cwd: source_cwd, shell_profile, ..CreateSessionOptions::default() },
+    ) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!("Failed to create PTY for split: {}", e);
@@ -195,13 +250,8 @@ pub async fn split_pane(
 
     // Store updated layout
     let active_pane_id = new_pane_id.clone();
-    manager.insert_tab(
-        tab_id.clone(),
-        serde_json::json!({
-            "layout": new_layout.clone(),
-            "active_pane_id": active_pane_id.clone(),
-        }),
-    );
+    manager.merge_tab_layout(tab_id.clone(), new_layout.clone(), Some(active_pane_id.clone()));
+    restore_state::save_state(&manager);
 
     // Broadcast to all sync clients
     manager.broadcast_sync(&SyncMsg::LayoutUpdated {
@@ -261,6 +311,7 @@ pub async fn close_pane(
     if leaf_ids.len() <= 1 {
         // Last pane - remove entire tab
         manager.remove_tab(&tab_id);
+        restore_state::save_state(&manager);
 
         // Broadcast tab closed
         manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
@@ -281,13 +332,8 @@ pub async fn close_pane(
             .unwrap_or("")
             .to_string();
 
-        manager.insert_tab(
-            tab_id.clone(),
-            serde_json::json!({
-                "layout": new_layout.clone(),
-                "active_pane_id": active_pane_id.clone(),
-            }),
-        );
+        manager.merge_tab_layout(tab_id.clone(), new_layout.clone(), Some(active_pane_id.clone()));
+        restore_state::save_state(&manager);
 
         // Broadcast layout updated
         manager.broadcast_sync(&SyncMsg::LayoutUpdated {
@@ -331,16 +377,11 @@ pub async fn activate_pane(
     }
 
     // Update active pane
-    manager.insert_tab(
-        tab_id.clone(),
-        serde_json::json!({
-            "layout": layout,
-            "active_pane_id": pane_id,
-        }),
-    );
+    manager.merge_tab_layout(tab_id.clone(), layout, Some(pane_id.clone()));
 
     // Update global active pane
     *manager.active_pane_id.lock().expect("mutex poisoned") = Some(pane_id.clone());
+    restore_state::save_state(&manager);
 
     // Broadcast to all sync clients
     manager.broadcast_sync(&SyncMsg::TabActivated { pane_id });
@@ -363,13 +404,8 @@ pub async fn update_layout(
     }
 
     // Store updated layout
-    manager.insert_tab(
-        tab_id.clone(),
-        serde_json::json!({
-            "layout": req.layout.clone(),
-            "active_pane_id": req.active_pane_id.clone(),
-        }),
-    );
+    manager.merge_tab_layout(tab_id.clone(), req.layout.clone(), Some(req.active_pane_id.clone()));
+    restore_state::save_state(&manager);
 
     // Broadcast to all sync clients
     manager.broadcast_sync(&SyncMsg::LayoutUpdated {
@@ -377,6 +413,37 @@ pub async fn update_layout(
         layout: req.layout,
         active_pane_id: req.active_pane_id,
     });
+
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+// ─── PUT /api/tabs/{tab_id}/meta ───────────────────────────────────
+
+#[allow(clippy::unused_async)]
+pub async fn update_tab_meta(
+    State(manager): State<Arc<SessionManager>>,
+    Path(tab_id): Path<String>,
+    Json(req): Json<UpdateTabMetaRequest>,
+) -> impl IntoResponse {
+    if !manager.tab_layouts.contains_key(&tab_id) {
+        return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "tab not found" })))
+            .into_response();
+    }
+
+    let mut metadata = serde_json::json!({});
+    if let Some(group_id) = req.group_id {
+        metadata["group_id"] = match group_id {
+            Some(id) => serde_json::Value::String(id),
+            None => serde_json::Value::Null,
+        };
+    }
+    if let Some(workspace_roots) = req.workspace_roots {
+        metadata["workspace_roots"] = serde_json::Value::Array(
+            workspace_roots.into_iter().map(serde_json::Value::String).collect(),
+        );
+    }
+    manager.merge_tab_meta(&tab_id, &metadata);
+    restore_state::save_state(&manager);
 
     Json(serde_json::json!({ "ok": true })).into_response()
 }

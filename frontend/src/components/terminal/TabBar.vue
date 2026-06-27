@@ -55,6 +55,35 @@
       </div>
     </div>
     <slot name="left" />
+    <div class="project-menu-wrap" ref="projectWrapRef">
+      <button
+        type="button"
+        class="project-menu-btn"
+        title="Project Group"
+        @click="projectMenuOpen = !projectMenuOpen"
+        @touchend.prevent="projectMenuOpen = !projectMenuOpen"
+      >
+        {{ activeProjectName }}
+      </button>
+      <div v-if="projectMenuOpen" class="project-dropdown" @mouseleave="projectMenuOpen = false">
+        <div class="project-dropdown-item" @click="emitProject({ type: 'select', groupId: null })">
+          No Project
+        </div>
+        <div
+          v-for="group in projectGroups"
+          :key="group.id"
+          class="project-dropdown-item"
+          @click="emitProject({ type: 'select', groupId: group.id })"
+        >
+          {{ group.name }}
+        </div>
+        <div class="new-menu-sep" />
+        <div class="project-dropdown-item" @click="emitProject({ type: 'create' })">Create Project...</div>
+        <div class="project-dropdown-item" @click="emitProject({ type: 'move-active', groupId: activeProjectGroupId ?? null })">
+          Move Current Tab Here
+        </div>
+      </div>
+    </div>
     <div class="new-tab-split" ref="newMenuWrapRef">
       <button
         id="tab-new-btn"
@@ -74,6 +103,20 @@
           <span class="new-menu-label">{{ t('keybinding.newTab') }}</span>
           <kbd class="new-menu-kbd">{{ kbdNewTab }}</kbd>
         </div>
+        <template v-if="shellProfiles.length > 0">
+          <div class="new-menu-subtitle">Shell Profile</div>
+          <div
+            v-for="profile in shellProfiles"
+            :key="profile.id"
+            class="new-menu-item"
+            @click="emitProfile(profile.id)"
+            @touchend.prevent="emitProfile(profile.id)"
+          >
+            <Terminal :size="14" class="new-menu-icon" />
+            <span class="new-menu-label">{{ profile.name }}</span>
+            <span v-if="profile.id === defaultShellProfileId" class="new-menu-kbd">Default</span>
+          </div>
+        </template>
         <div class="new-menu-sep" />
         <div
           class="new-menu-item"
@@ -142,7 +185,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onBeforeUnmount, nextTick, computed } from 'vue'
 import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
@@ -169,12 +212,28 @@ export interface PluginInfo {
   state: string
 }
 
-withDefaults(
+export interface ShellProfileInfo {
+  id: string
+  name: string
+  kind: string
+}
+
+export interface ProjectGroupInfo {
+  id: string
+  name: string
+  archived?: boolean
+}
+
+const props = withDefaults(
   defineProps<{
     tabs: TabInfo[]
     activePaneId: string | null
     indicators?: Record<string, string>
     plugins?: PluginInfo[]
+    shellProfiles?: ShellProfileInfo[]
+    defaultShellProfileId?: string | null
+    projectGroups?: ProjectGroupInfo[]
+    activeProjectGroupId?: string | null
     canBroadcast?: boolean
     broadcastActive?: boolean
     isMobile?: boolean
@@ -184,6 +243,10 @@ withDefaults(
   {
     indicators: () => ({}),
     plugins: () => [],
+    shellProfiles: () => [],
+    defaultShellProfileId: null,
+    projectGroups: () => [],
+    activeProjectGroupId: null,
     canBroadcast: false,
     broadcastActive: false,
     isMobile: false,
@@ -195,7 +258,8 @@ withDefaults(
 const emit = defineEmits<{
   activate: [paneId: string]
   close: [paneId: string]
-  action: [type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast']
+  action: [type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' | { type: 'new-tab-profile'; profileId: string }]
+  'project-action': [action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null }]
   reorder: [fromId: string, toId: string]
   'open-plugin': [pluginId: string]
   rename: [paneId: string, title: string]
@@ -248,25 +312,45 @@ function cancelEdit() {
 
 const pluginMenuOpen = ref(false)
 const pluginWrapRef = ref<HTMLElement>()
+const projectMenuOpen = ref(false)
+const projectWrapRef = ref<HTMLElement>()
 const newMenuOpen = ref(false)
 const newMenuWrapRef = ref<HTMLElement>()
+
+const activeProjectName = computed(() => {
+  const group = props.projectGroups.find((g) => g.id === props.activeProjectGroupId)
+  return group?.name ?? 'Project'
+})
 
 function emitAction(type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast') {
   emit('action', type)
   newMenuOpen.value = false
 }
 
+function emitProfile(profileId: string) {
+  emit('action', { type: 'new-tab-profile', profileId })
+  newMenuOpen.value = false
+}
+
+function emitProject(action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null }) {
+  emit('project-action', action)
+  projectMenuOpen.value = false
+}
+
 function onDocTouchStart(e: TouchEvent) {
   if (pluginWrapRef.value && !pluginWrapRef.value.contains(e.target as Node)) {
     pluginMenuOpen.value = false
+  }
+  if (projectWrapRef.value && !projectWrapRef.value.contains(e.target as Node)) {
+    projectMenuOpen.value = false
   }
   if (newMenuWrapRef.value && !newMenuWrapRef.value.contains(e.target as Node)) {
     newMenuOpen.value = false
   }
 }
 
-watch([pluginMenuOpen, newMenuOpen], ([pluginOpen, newOpen]) => {
-  if (pluginOpen || newOpen) {
+watch([pluginMenuOpen, projectMenuOpen, newMenuOpen], ([pluginOpen, projectOpen, newOpen]) => {
+  if (pluginOpen || projectOpen || newOpen) {
     document.addEventListener('touchstart', onDocTouchStart, { passive: true })
   } else {
     document.removeEventListener('touchstart', onDocTouchStart)
@@ -501,10 +585,26 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   max-width: 200px;
 }
-.new-tab-split {
+.new-tab-split,
+.project-menu-wrap {
   position: relative;
 }
-.new-menu-dropdown {
+.project-menu-btn {
+  height: 28px;
+  max-width: 140px;
+  padding: 0 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--bg-surface, #1e1e1e);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-menu-dropdown,
+.project-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
@@ -516,7 +616,8 @@ onBeforeUnmount(() => {
   z-index: 500;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
-.new-menu-item {
+.new-menu-item,
+.project-dropdown-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -525,7 +626,8 @@ onBeforeUnmount(() => {
   font-size: 13px;
   white-space: nowrap;
 }
-.new-menu-item:hover {
+.new-menu-item:hover,
+.project-dropdown-item:hover {
   background: var(--bg-hover, #2a2a2a);
 }
 .new-menu-icon {
@@ -548,6 +650,13 @@ onBeforeUnmount(() => {
   height: 1px;
   background: var(--border, #333);
   margin: 4px 0;
+}
+.new-menu-subtitle {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .new-menu-status {
   font-size: 11px;

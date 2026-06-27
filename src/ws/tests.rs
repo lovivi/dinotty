@@ -5,7 +5,7 @@ fn client_msg_input_deserializes() {
     let msg: ClientMsg = serde_json::from_str(r#"{"type":"input","data":"ls\n"}"#).unwrap();
     match msg {
         ClientMsg::Input { data } => assert_eq!(data, "ls\n"),
-        _ => panic!("expected Input"),
+        ClientMsg::Resize { .. } => panic!("expected Input"),
     }
 }
 
@@ -17,7 +17,7 @@ fn client_msg_resize_deserializes() {
             assert_eq!(cols, 120);
             assert_eq!(rows, 40);
         }
-        _ => panic!("expected Resize"),
+        ClientMsg::Input { .. } => panic!("expected Resize"),
     }
 }
 

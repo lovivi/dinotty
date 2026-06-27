@@ -349,7 +349,7 @@ async function loadPlugin(id: string): Promise<LoadedPlugin> {
     mod = await dynamicImport(blobUrl)
   } catch (e: any) {
     URL.revokeObjectURL(blobUrl)
-    throw new Error(`Plugin ${id}: failed to load ${jsUrl}: ${e.message}`)
+    throw new Error(`Plugin ${id}: failed to load ${jsUrl}: ${e.message}`, { cause: e })
   } finally {
     URL.revokeObjectURL(blobUrl)
   }
@@ -389,7 +389,7 @@ async function loadPlugin(id: string): Promise<LoadedPlugin> {
     ])
     exports = (result as PluginExports) || null
   } catch (e: any) {
-    throw new Error(`Plugin ${id}: activate() threw: ${e.message}`)
+    throw new Error(`Plugin ${id}: activate() threw: ${e.message}`, { cause: e })
   }
 
   const plugin: LoadedPlugin = { id, manifest, module: mod, exports, state: 'active' }
