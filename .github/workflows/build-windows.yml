@@ -3,7 +3,7 @@ name: Build Windows Desktop
 on:
   workflow_dispatch:
   push:
-    branches: [main, dev]
+    branches: [main, dev, feat/windows-shell-profiles]
     paths:
       - 'src-tauri/**'
       - 'frontend/**'
