@@ -232,8 +232,8 @@ export function useSyncWebSocket(opts: {
             previewAddress: '',
             previewUrl: '',
             previewKind: 'web',
-            groupId: null,
-            workspaceRoots: [],
+            groupId: msg.group_id ?? null,
+            workspaceRoots: msg.workspace_roots ?? [],
           })
           activePaneId.value = msg.tab_id
           persist()

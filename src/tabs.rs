@@ -122,6 +122,8 @@ pub async fn create_tab(
         tab_id: tab_id.clone(),
         pane_id: pane_id.clone(),
         layout: Some(layout.clone()),
+        group_id: group_id.clone(),
+        workspace_roots: Some(workspace_roots.clone()),
     });
 
     Json(serde_json::json!({

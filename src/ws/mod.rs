@@ -186,6 +186,8 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                     tab_id: tab_id.clone(),
                                     pane_id: leaf_id.clone(),
                                     layout: Some(layout.clone()),
+                                    group_id: None,
+                                    workspace_roots: None,
                                 })
                                 .unwrap(),
                             );
@@ -195,6 +197,8 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                     tab_id,
                                     pane_id: leaf_id,
                                     layout: Some(layout),
+                                    group_id: None,
+                                    workspace_roots: None,
                                 },
                                 &client_id,
                             );

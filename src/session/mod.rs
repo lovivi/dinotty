@@ -432,6 +432,10 @@ pub enum SyncMsg {
         tab_id: String,
         pane_id: String,
         layout: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        group_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        workspace_roots: Option<Vec<String>>,
     },
     TabClosed {
         pane_id: String,
