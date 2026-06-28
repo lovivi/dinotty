@@ -58,7 +58,7 @@ export interface SyncTabCreated {
 
 export interface SyncTabClosed {
   type: 'tab_closed'
-  pane_id: string
+  tab_id: string
 }
 
 export interface SyncTabActivated {
@@ -92,6 +92,8 @@ export interface SyncCreateTab {
   layout: any
   tab_id?: string
   pane_id?: string
+  group_id?: string | null
+  workspace_roots?: string[]
 }
 
 export interface SyncCloseTab {

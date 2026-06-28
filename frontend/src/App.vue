@@ -557,9 +557,13 @@ window.addEventListener('beforeunload', (e) => {
 
 const DEFAULT_PREVIEW_URL = ''
 
-async function newTab(profileId?: string) {
+async function newTab(profileId?: string, groupIdOverride?: string | null) {
   try {
-    const activeGroupId = session.activeProjectGroupId
+    // Prefer the caller-provided group so nextTick-based triggers (e.g.
+    // switching projects) can't have their target rewritten by a later
+    // setActiveProjectGroup() call that runs before the await resolves.
+    const activeGroupId =
+      groupIdOverride !== undefined ? groupIdOverride : session.activeProjectGroupId
     const group = appSettings.project_groups.find((g) => g.id === activeGroupId)
     const result = await apiCreateTab({
       ...(profileId ? { profile_id: profileId } : {}),
@@ -630,6 +634,7 @@ type ProjectAction =
   | { type: 'move-active'; groupId: string | null }
   | { type: 'rename'; groupId: string }
   | { type: 'move-to'; groupId: string }
+  | { type: 'delete'; groupId: string }
 
 async function onProjectAction(action: ProjectAction) {
   if (action.type === 'select') {
@@ -640,14 +645,17 @@ async function onProjectAction(action: ProjectAction) {
       if (first) {
         activePaneId.value = first.paneId
       } else if (action.groupId) {
-        // Switching to an empty group — create a tab in it
-        nextTick(() => newTab())
+        // Switching to an empty group — create a tab in it.
+        // Capture the target now so a subsequent project switch can't
+        // reroute this newTab into a different project.
+        const targetGroup = action.groupId
+        nextTick(() => newTab(undefined, targetGroup))
       }
     }
     return
   }
   if (action.type === 'create') {
-    const name = window.prompt('Project name')?.trim()
+    const name = window.prompt(t('project.promptCreate'))?.trim()
     if (!name) return
     const now = Date.now()
     const group: ProjectGroup = {
@@ -675,8 +683,28 @@ async function onProjectAction(action: ProjectAction) {
       }
     }
     session.setActiveProjectGroup(group.id)
-    await settingsStore.save()
-    persist()
+
+    // Persist the project itself first; failure here rolls back local state.
+    try {
+      await settingsStore.save()
+    } catch (e) {
+      console.error('Failed to save project:', e)
+      const idx = appSettings.project_groups.findIndex((g) => g.id === group.id)
+      if (idx !== -1) appSettings.project_groups.splice(idx, 1)
+      if (appSettings.default_project_group_id === group.id) {
+        appSettings.default_project_group_id = null
+      }
+      for (const { paneId } of autoAssigned) {
+        session.moveTabToProjectGroup(paneId, null)
+      }
+      session.setActiveProjectGroup(null)
+      return
+    }
+
+    // Now persist each auto-assigned tab meta. If any one fails, leave the
+    // local group-id as-is — the next reload will re-sync from the server
+    // (acceptable since the project itself was saved).
+    let allMetaOk = true
     for (const { paneId, workspaceRoots } of autoAssigned) {
       try {
         await apiUpdateTabMeta(paneId, {
@@ -685,23 +713,35 @@ async function onProjectAction(action: ProjectAction) {
         })
       } catch (e) {
         console.error('Failed to sync tab meta:', e)
+        allMetaOk = false
       }
     }
+    if (!allMetaOk) {
+      console.warn('Some tab meta syncs failed; will reconcile on next reload')
+    }
+    persist()
     return
   }
   if (action.type === 'move-active') {
     if (!activePaneId.value) return
-    session.moveTabToProjectGroup(activePaneId.value, action.groupId)
-    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
-    if (tab?.type === 'terminal') {
-      try {
-        await apiUpdateTabMeta(tab.paneId, {
-          group_id: action.groupId,
-          workspace_roots: tab.workspaceRoots ?? [],
-        })
-      } catch (e) {
-        console.error('Failed to sync tab meta:', e)
-      }
+    // No-op if the active tab is already in the requested project.
+    const cur = tabs.value.find((t) => t.paneId === activePaneId.value) as TerminalTab | undefined
+    if (!cur) return
+    if ((cur.groupId ?? null) === action.groupId) return
+    const tabId = cur.paneId
+    const workspaceRoots = cur.workspaceRoots ?? []
+    const originalGroup = cur.groupId ?? null
+    session.moveTabToProjectGroup(tabId, action.groupId)
+    try {
+      await apiUpdateTabMeta(cur.paneId, {
+        group_id: action.groupId,
+        workspace_roots: workspaceRoots,
+      })
+    } catch (e) {
+      console.error('Failed to sync tab meta:', e)
+      // Roll back local change so UI doesn't lie.
+      session.moveTabToProjectGroup(tabId, originalGroup)
+      return
     }
     persist()
     return
@@ -709,29 +749,102 @@ async function onProjectAction(action: ProjectAction) {
   if (action.type === 'rename') {
     const group = appSettings.project_groups.find((g) => g.id === action.groupId)
     if (!group) return
-    const name = window.prompt('Rename project', group.name)?.trim()
+    const name = window.prompt(t('project.promptRename'), group.name)?.trim()
     if (!name || name === group.name) return
+    const oldName = group.name
     group.name = name
     group.updated_at = Date.now()
-    await settingsStore.save()
-    persist()
+    try {
+      await settingsStore.save()
+    } catch (e) {
+      console.error('Failed to rename project:', e)
+      group.name = oldName
+      return
+    }
     return
   }
   if (action.type === 'move-to') {
     if (!activePaneId.value) return
-    session.moveTabToProjectGroup(activePaneId.value, action.groupId)
-    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
-    if (tab?.type === 'terminal') {
-      try {
-        await apiUpdateTabMeta(tab.paneId, {
-          group_id: action.groupId,
-          workspace_roots: tab.workspaceRoots ?? [],
-        })
-      } catch (e) {
-        console.error('Failed to sync tab meta:', e)
-      }
+    const cur = tabs.value.find((t) => t.paneId === activePaneId.value) as TerminalTab | undefined
+    if (!cur) return
+    if ((cur.groupId ?? null) === action.groupId) return
+    const tabId = cur.paneId
+    const workspaceRoots = cur.workspaceRoots ?? []
+    const originalGroup = cur.groupId ?? null
+    session.moveTabToProjectGroup(tabId, action.groupId)
+    try {
+      await apiUpdateTabMeta(cur.paneId, {
+        group_id: action.groupId,
+        workspace_roots: workspaceRoots,
+      })
+    } catch (e) {
+      console.error('Failed to sync tab meta:', e)
+      session.moveTabToProjectGroup(tabId, originalGroup)
+      return
     }
     session.setActiveProjectGroup(action.groupId)
+    persist()
+  }
+  if (action.type === 'delete') {
+    const group = appSettings.project_groups.find((g) => g.id === action.groupId)
+    if (!group) return
+    const tabCount = tabs.value.filter(
+      (t) => t.type === 'terminal' && t.groupId === action.groupId
+    ).length
+    const msg = tabCount > 0
+      ? t('project.confirmDeleteWithTabs', { name: group.name, n: tabCount })
+      : t('project.confirmDelete', { name: group.name })
+    if (!window.confirm(msg)) return
+
+    const idx = appSettings.project_groups.findIndex((g) => g.id === action.groupId)
+    if (idx === -1) return
+
+    // Move all tabs in this group to "No Project" first — both locally and
+    // on the backend, in order.
+    const affected: Array<{ tabId: string; workspaceRoots: string[] }> = []
+    for (const tab of tabs.value) {
+      if (tab.type === 'terminal' && tab.groupId === action.groupId) {
+        affected.push({ tabId: tab.paneId, workspaceRoots: tab.workspaceRoots ?? [] })
+        session.moveTabToProjectGroup(tab.paneId, null)
+      }
+    }
+
+    appSettings.project_groups.splice(idx, 1)
+    if (appSettings.default_project_group_id === action.groupId) {
+      appSettings.default_project_group_id = null
+    }
+    if (session.activeProjectGroupId === action.groupId) {
+      session.setActiveProjectGroup(null)
+    }
+
+    try {
+      await settingsStore.save()
+    } catch (e) {
+      console.error('Failed to save after delete:', e)
+      // Roll back
+      appSettings.project_groups.splice(idx, 0, group)
+      if (group.id) appSettings.default_project_group_id = group.id
+      for (const { tabId } of affected) {
+        session.moveTabToProjectGroup(tabId, action.groupId)
+      }
+      return
+    }
+
+    let allMetaOk = true
+    for (const { tabId, workspaceRoots } of affected) {
+      try {
+        await apiUpdateTabMeta(tabId, {
+          group_id: null,
+          workspace_roots: workspaceRoots,
+        })
+      } catch (e) {
+        console.error('Failed to sync tab meta after delete:', e)
+        allMetaOk = false
+      }
+    }
+    if (!allMetaOk) {
+      console.warn('Some tab meta syncs failed after delete; will reconcile on next reload')
+    }
     persist()
   }
 }

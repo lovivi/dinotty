@@ -240,10 +240,10 @@ export function useSyncWebSocket(opts: {
           nextTick(() => focusActive())
         }
       } else if (msg.type === 'tab_closed') {
-        let tabIdx = tabs.value.findIndex((t) => t.type === 'terminal' && t.paneId === msg.pane_id)
+        let tabIdx = tabs.value.findIndex((t) => t.type === 'terminal' && t.paneId === msg.tab_id)
         if (tabIdx === -1) {
           tabIdx = tabs.value.findIndex(
-            (t) => t.type === 'terminal' && !!findLeaf(t.layout, msg.pane_id)
+            (t) => t.type === 'terminal' && !!findLeaf(t.layout, msg.tab_id)
           )
         }
         if (tabIdx !== -1) {
@@ -255,7 +255,16 @@ export function useSyncWebSocket(opts: {
           if (tabs.value.length === 0) {
             newTab()
           } else if (activePaneId.value === tab.paneId) {
-            activePaneId.value = tabs.value[Math.min(tabIdx, tabs.value.length - 1)].paneId
+            // Prefer a tab visible under the current project filter so the
+            // active tab doesn't silently jump out of the current project.
+            const visible = tabs.value.filter((t) => {
+              if (t.type !== 'terminal') return true
+              return (t as TerminalTab).groupId === session.activeProjectGroupId
+            })
+            const pickFrom =
+              visible.length > 0 ? visible : tabs.value
+            const newIdx = Math.min(tabIdx, pickFrom.length - 1)
+            activePaneId.value = pickFrom[newIdx].paneId
             persist()
             nextTick(() => focusActive())
           }

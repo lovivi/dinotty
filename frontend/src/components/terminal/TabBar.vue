@@ -59,7 +59,7 @@
       <button
         type="button"
         class="project-menu-btn"
-        title="Project Group"
+        :title="t('project.menuTitle')"
         @click="projectMenuOpen = !projectMenuOpen"
         @touchend.prevent="projectMenuOpen = !projectMenuOpen"
       >
@@ -67,7 +67,7 @@
       </button>
       <div v-if="projectMenuOpen" class="project-dropdown" @mouseleave="projectMenuOpen = false">
         <div class="project-dropdown-item" @click="emitProject({ type: 'select', groupId: null })">
-          No Project
+          {{ t('project.noProject') }}
         </div>
         <div
           v-for="group in projectGroups"
@@ -77,23 +77,30 @@
           <span class="project-group-name" @click="emitProject({ type: 'select', groupId: group.id })">{{ group.name }}</span>
           <button
             class="project-group-icon-btn"
-            title="Rename project"
+            :title="t('project.renameTitle')"
             @click.stop="emitProject({ type: 'rename', groupId: group.id })"
           >
             <Pencil :size="12" />
           </button>
           <button
             class="project-group-icon-btn"
-            title="Move current tab here"
+            :title="t('project.moveToTitle')"
             @click.stop="emitProject({ type: 'move-to', groupId: group.id })"
           >
             <ArrowRightLeft :size="12" />
           </button>
+          <button
+            class="project-group-icon-btn project-group-icon-btn-danger"
+            :title="t('project.deleteTitle')"
+            @click.stop="emitProject({ type: 'delete', groupId: group.id })"
+          >
+            <Trash :size="12" />
+          </button>
         </div>
         <div class="new-menu-sep" />
-        <div class="project-dropdown-item" @click="emitProject({ type: 'create' })">Create Project...</div>
+        <div class="project-dropdown-item" @click="emitProject({ type: 'create' })">{{ t('project.create') }}</div>
         <div class="project-dropdown-item" @click="emitProject({ type: 'move-active', groupId: activeProjectGroupId ?? null })">
-          Move Current Tab Here
+          {{ t('project.moveCurrentTabHere') }}
         </div>
       </div>
     </div>
@@ -199,7 +206,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick, computed } from 'vue'
-import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard, Pencil, ArrowRightLeft } from 'lucide-vue-next'
+import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard, Pencil, ArrowRightLeft, Trash } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
 
@@ -272,7 +279,7 @@ const emit = defineEmits<{
   activate: [paneId: string]
   close: [paneId: string]
   action: [type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' | { type: 'new-tab-profile'; profileId: string }]
-  'project-action': [action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null } | { type: 'rename'; groupId: string } | { type: 'move-to'; groupId: string }]
+  'project-action': [action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null } | { type: 'rename'; groupId: string } | { type: 'move-to'; groupId: string } | { type: 'delete'; groupId: string }]
   reorder: [fromId: string, toId: string]
   'open-plugin': [pluginId: string]
   rename: [paneId: string, title: string]
@@ -345,7 +352,7 @@ function emitProfile(profileId: string) {
   newMenuOpen.value = false
 }
 
-function emitProject(action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null } | { type: 'rename'; groupId: string } | { type: 'move-to'; groupId: string }) {
+function emitProject(action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null } | { type: 'rename'; groupId: string } | { type: 'move-to'; groupId: string } | { type: 'delete'; groupId: string }) {
   if (action.type !== 'rename') projectMenuOpen.value = false
   emit('project-action', action)
 }
@@ -669,6 +676,10 @@ onBeforeUnmount(() => {
 .project-group-icon-btn:hover {
   background: var(--bg-active, #444);
   color: var(--text, #eee);
+}
+.project-group-icon-btn-danger:hover {
+  background: var(--color-danger, #c0392b);
+  color: #fff;
 }
 .new-menu-icon {
   flex-shrink: 0;
