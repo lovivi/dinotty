@@ -51,7 +51,7 @@ async function connectWs() {
 export function useHistory() {
   connectWs()
 
-  async function fetchSuggestions(prefix?: string) {
+  async function fetchSuggestions(prefix?: string): Promise<SuggestionItem[]> {
     const params = new URLSearchParams()
     if (prefix) params.set('prefix', prefix)
     params.set('limit', '20')
@@ -59,11 +59,14 @@ export function useHistory() {
     try {
       const res = await authFetch(apiUrl(`/api/history?${params}`))
       if (res.ok) {
-        suggestions.value = await res.json()
+        const items = await res.json() as SuggestionItem[]
+        suggestions.value = items
+        return items
       }
     } catch {
       // ignore
     }
+    return []
   }
 
   function fetchDebounced(prefix?: string) {

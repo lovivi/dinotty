@@ -83,6 +83,7 @@ export class TerminalInstance {
   onPreviewLink: ((url: string, x?: number, y?: number) => void) | null = null
   onRawOutput: ((data: string) => void) | null = null
   onInput: ((data: string) => void) | null = null
+  onBeforeSend: ((data: string) => boolean) | null = null
 
   constructor(paneId: string) {
     this.paneId = paneId
@@ -418,6 +419,7 @@ export class TerminalInstance {
         if (data === this._lastInputData && now - this._lastInputTime < 5) return
         this._lastInputData = data
         this._lastInputTime = now
+        if (this.onBeforeSend?.(data)) return
         this.onInput?.(data)
         this._transport?.send({ type: 'input', data })
       })
@@ -489,6 +491,7 @@ export class TerminalInstance {
         if (data === this._lastInputData && now - this._lastInputTime < 5) return
         this._lastInputData = data
         this._lastInputTime = now
+        if (this.onBeforeSend?.(data)) return
         this.onInput?.(data)
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.ws.send(JSON.stringify({ type: 'input', data } as ClientMsg))

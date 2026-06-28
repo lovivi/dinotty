@@ -173,7 +173,7 @@ impl HistoryState {
         let mut results: Vec<_> = match prefix {
             Some(p) if !p.is_empty() => entries
                 .iter()
-                .filter(|(cmd, _)| cmd.starts_with(p))
+                .filter(|(cmd, _)| cmd.contains(p))
                 .map(|(cmd, &freq)| SuggestionItem { command: cmd.clone(), frequency: freq })
                 .collect(),
             _ => entries

@@ -13,6 +13,13 @@
       :terminal="terminal"
       @close="searchVisible = false"
     />
+    <InlineAutocomplete
+      :suggestion="autocomplete.currentSuggestion.value"
+      :typed-text="autocomplete.typedPrefix.value"
+      :cursor-x="autocomplete.cursorPixelX.value"
+      :cursor-y="autocomplete.cursorPixelY.value"
+      :visible="autocomplete.visible.value"
+    />
   </div>
   <TerminalContextMenu
     :visible="menuVisible"
@@ -45,6 +52,8 @@ import { TerminalInstance } from '../../composables/useTerminal'
 import SearchBar from './SearchBar.vue'
 import TerminalContextMenu from './TerminalContextMenu.vue'
 import SelectionHandles from './SelectionHandles.vue'
+import InlineAutocomplete from './InlineAutocomplete.vue'
+import { useAutocomplete } from '../../composables/useAutocomplete'
 
 const props = defineProps<{
   paneId: string
@@ -64,6 +73,7 @@ const emit = defineEmits<{
 const wrapperRef = ref<HTMLElement>()
 let terminal: TerminalInstance | null = null
 const searchVisible = ref(false)
+const autocomplete = useAutocomplete()
 
 // Context menu state
 const menuVisible = ref(false)
@@ -501,6 +511,8 @@ onMounted(() => {
     menuVisible.value = true
   }
 
+  autocomplete.bind(terminal)
+
   requestAnimationFrame(() => {
     if (wrapperRef.value) {
       terminal!.attach(wrapperRef.value)
@@ -509,6 +521,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  autocomplete.unbind()
   terminal?.destroy()
   terminal = null
 })
