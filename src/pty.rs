@@ -213,7 +213,7 @@ pub fn create_session_with_options(
             let tab_pane_id = manager_clone
                 .on_pty_exited(&pane_id_clone)
                 .unwrap_or_else(|| pane_id_clone.clone());
-            manager_clone.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_pane_id });
+            manager_clone.broadcast_sync(&SyncMsg::TabClosed { tab_id: tab_pane_id });
         }
         info!("PTY exited, session removed: pane={}", pane_id_clone);
         let cb = session_clone.tauri_on_exit.lock().expect("mutex poisoned").clone();

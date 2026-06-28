@@ -6,12 +6,26 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::pty::{self, CreateSessionOptions};
 use crate::restore_state;
 use crate::session::{self, SessionManager, SyncMsg};
 use crate::shell_profiles;
+
+/// Pick the first existing directory from `workspace_roots`, falling back to
+/// `None` if none of them exist on disk. Used to give new terminals a sane
+/// starting cwd without crashing on stale paths.
+fn cwd_from_workspace_roots(roots: &[String]) -> Option<PathBuf> {
+    for root in roots {
+        let p = PathBuf::from(root);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    None
+}
 
 // ─── Request/Response types ────────────────────────────────────────
 
@@ -76,12 +90,17 @@ pub async fn create_tab(
     let shell_profile_name = shell_profile.as_ref().map(|profile| profile.name.clone());
     let group_id = req.group_id.clone();
     let workspace_roots = req.workspace_roots.clone();
+    let cwd = cwd_from_workspace_roots(&workspace_roots);
 
     // Create PTY session
     let (_session, _shell_type) = match pty::create_session_with_options(
         &manager,
         &pane_id,
-        CreateSessionOptions { shell_profile, ..CreateSessionOptions::default() },
+        CreateSessionOptions {
+            cwd,
+            shell_profile,
+            ..CreateSessionOptions::default()
+        },
     ) {
         Ok(x) => x,
         Err(e) => {
@@ -163,7 +182,7 @@ pub async fn close_tab(
     restore_state::save_state(&manager);
 
     // Broadcast to all sync clients
-    manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
+    manager.broadcast_sync(&SyncMsg::TabClosed { tab_id: tab_id.clone() });
 
     Json(serde_json::json!({ "ok": true })).into_response()
 }
@@ -316,7 +335,7 @@ pub async fn close_pane(
         restore_state::save_state(&manager);
 
         // Broadcast tab closed
-        manager.broadcast_sync(&SyncMsg::TabClosed { pane_id: tab_id });
+        manager.broadcast_sync(&SyncMsg::TabClosed { tab_id: tab_id.clone() });
 
         Json(serde_json::json!({ "ok": true, "tab_closed": true }))
     } else {

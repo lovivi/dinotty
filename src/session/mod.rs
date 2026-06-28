@@ -438,7 +438,7 @@ pub enum SyncMsg {
         workspace_roots: Option<Vec<String>>,
     },
     TabClosed {
-        pane_id: String,
+        tab_id: String,
     },
     TabActivated {
         pane_id: String,

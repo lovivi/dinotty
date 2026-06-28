@@ -46,6 +46,10 @@ pub enum SyncClientMsg {
         tab_id: Option<String>,
         #[serde(default)]
         pane_id: Option<String>,
+        #[serde(default)]
+        group_id: Option<String>,
+        #[serde(default)]
+        workspace_roots: Option<Vec<String>>,
     },
     CloseTab {
         pane_id: String,
@@ -165,18 +169,32 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                 &client_id,
                             );
                         }
-                        SyncClientMsg::CreateTab { layout, tab_id, pane_id } => {
+                        SyncClientMsg::CreateTab {
+                            layout,
+                            tab_id,
+                            pane_id,
+                            group_id,
+                            workspace_roots,
+                        } => {
                             let tab_id = tab_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                             let leaf_id = pane_id
                                 .or_else(|| crate::session::first_leaf_id(&layout))
                                 .unwrap_or_else(|| tab_id.clone());
                             *manager.active_pane_id.lock().expect("mutex poisoned") =
                                 Some(leaf_id.clone());
+                            // Store group_id / workspace_roots into the tab
+                            // metadata so subsequent `tab_list` snapshots carry
+                            // them. Absent on the wire → stored as JSON null /
+                            // empty array to match the REST path.
+                            let meta_group_id = group_id.clone();
+                            let meta_workspace_roots = workspace_roots.clone().unwrap_or_default();
                             manager.insert_tab(
                                 tab_id.clone(),
                                 serde_json::json!({
                                     "layout": layout,
                                     "active_pane_id": leaf_id,
+                                    "group_id": meta_group_id,
+                                    "workspace_roots": meta_workspace_roots,
                                 }),
                             );
                             restore_state::save_state(&manager);
@@ -186,8 +204,8 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                     tab_id: tab_id.clone(),
                                     pane_id: leaf_id.clone(),
                                     layout: Some(layout.clone()),
-                                    group_id: None,
-                                    workspace_roots: None,
+                                    group_id: group_id.clone(),
+                                    workspace_roots: workspace_roots.clone(),
                                 })
                                 .unwrap(),
                             );
@@ -197,8 +215,8 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                                     tab_id,
                                     pane_id: leaf_id,
                                     layout: Some(layout),
-                                    group_id: None,
-                                    workspace_roots: None,
+                                    group_id,
+                                    workspace_roots,
                                 },
                                 &client_id,
                             );
@@ -220,7 +238,7 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                             manager.purge_pane_from_layouts(&pane_id);
                             restore_state::save_state(&manager);
                             manager
-                                .broadcast_sync_others(&SyncMsg::TabClosed { pane_id }, &client_id);
+                                .broadcast_sync_others(&SyncMsg::TabClosed { tab_id: pane_id }, &client_id);
                         }
                         SyncClientMsg::ClosePane { pane_id } => {
                             manager.kill_and_remove(&pane_id);
@@ -261,7 +279,7 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                             // Broadcast TabClosed for tabs that became empty
                             for tab_id in emptied_tabs {
                                 manager.broadcast_sync_others(
-                                    &SyncMsg::TabClosed { pane_id: tab_id },
+                                    &SyncMsg::TabClosed { tab_id },
                                     &client_id,
                                 );
                             }
