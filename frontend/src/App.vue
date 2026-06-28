@@ -91,6 +91,7 @@
             :broadcast-mode="tab.broadcastMode"
             :broadcast-activity="tab.broadcastActivity"
             :allow-close="getAllLeaves(tab.layout).length > 1"
+            :restore-context-map="restoreContexts"
             @register="registerTermRef"
             @title-change="onTitleChange"
             @focus="(id: string) => splitPane.focusPane(id)"
@@ -104,19 +105,14 @@
                 splitPane.reorderPane(src, tgt, pos)
             "
             @divider-drag-end="onDividerDragEnd(tab)"
+            @restore-dismiss="(id: string) => dismissRestoreContext(id)"
+            @split="
+              (id: string, dir: 'horizontal' | 'vertical') => {
+                splitPane.focusPane(id)
+                splitPane.splitPane(dir)
+              }
+            "
           />
-          <div v-if="restoreContextFor(tab.activePaneId)" class="restore-context-card">
-            <div class="restore-context-title">Restored context</div>
-            <div class="restore-context-line">cwd: {{ restoreContextFor(tab.activePaneId)?.cwd ?? 'unknown' }}</div>
-            <div class="restore-context-line">
-              shell: {{ restoreContextFor(tab.activePaneId)?.shell_profile_name ?? restoreContextFor(tab.activePaneId)?.shell_profile_id ?? 'default' }}
-            </div>
-            <div v-if="restoreContextFor(tab.activePaneId)?.recent_commands?.length" class="restore-context-line">
-              recent: {{ restoreContextFor(tab.activePaneId)?.recent_commands.slice(-3).join(' · ') }}
-            </div>
-            <pre v-if="restoreContextFor(tab.activePaneId)?.output_tail?.length" class="restore-context-tail">{{ restoreContextFor(tab.activePaneId)?.output_tail.slice(-6).join('\n') }}</pre>
-            <button type="button" class="restore-context-dismiss" @click="dismissRestoreContext(tab.activePaneId)">Dismiss</button>
-          </div>
           <PreviewPanel
             v-if="tab.paneId === activePaneId"
             :ref="setPreviewPanelRef"
@@ -1474,43 +1470,5 @@ onBeforeUnmount(() => {
   text-align: center;
   padding: 0 3px;
   pointer-events: none;
-}
-.restore-context-card {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  z-index: 20;
-  max-width: min(520px, calc(100vw - 32px));
-  padding: 12px;
-  border: 1px solid var(--border, #333);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-surface, #1e1e1e) 94%, transparent);
-  color: var(--text, #ddd);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-  font-size: 12px;
-}
-.restore-context-title {
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-.restore-context-line {
-  color: var(--text-muted, #aaa);
-  margin: 2px 0;
-}
-.restore-context-tail {
-  max-height: 120px;
-  overflow: auto;
-  margin: 8px 0;
-  padding: 8px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.25);
-  white-space: pre-wrap;
-}
-.restore-context-dismiss {
-  border: 1px solid var(--border, #444);
-  border-radius: 6px;
-  background: var(--bg-hover, #2a2a2a);
-  color: inherit;
-  padding: 4px 8px;
 }
 </style>

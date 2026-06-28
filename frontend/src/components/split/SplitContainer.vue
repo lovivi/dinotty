@@ -22,6 +22,11 @@
       :direction="parentDirection"
       @reorder="(src, tgt, pos) => emit('reorder', src, tgt, pos)"
     />
+    <PaneRestoreBanner
+      v-if="restoreContextMap && restoreContextMap[leaf.paneId]"
+      :restore-context="restoreContextMap[leaf.paneId]"
+      @dismiss="emit('restoreDismiss', leaf.paneId)"
+    />
     <button
       v-if="allowClose"
       class="pane-close-btn"
@@ -77,6 +82,7 @@
       @file-click="(path: string) => emit('fileClick', path)"
       @preview-link="(url: string) => emit('previewLink', leaf!.paneId, url)"
       @link-activate="emit('linkActivate')"
+      @split="(dir: 'horizontal' | 'vertical') => emit('split', leaf!.paneId, dir)"
     />
   </div>
 
@@ -94,6 +100,7 @@
         :show-header="allowClose"
         :allow-close="allowClose"
         :parent-direction="split!.direction"
+        :restore-context-map="restoreContextMap"
         :style="getChildStyle(idx)"
         @register="(id: string, el: any) => emit('register', id, el)"
         @title-change="(id: string, title: string) => emit('titleChange', id, title)"
@@ -105,6 +112,8 @@
         @link-activate="emit('linkActivate')"
         @reorder="(src: string, tgt: string, pos: DropPosition) => emit('reorder', src, tgt, pos)"
         @divider-drag-end="emit('dividerDragEnd')"
+        @restore-dismiss="(id: string) => emit('restoreDismiss', id)"
+        @split="(id: string, dir: 'horizontal' | 'vertical') => emit('split', id, dir)"
       />
       <SplitDivider
         v-if="idx < split.children.length - 1"
@@ -124,17 +133,28 @@ import type { PaneLayout, LeafPane, DropPosition } from '../../types/pane'
 import TerminalPane from '../terminal/TerminalPane.vue'
 import SplitDivider from './SplitDivider.vue'
 import PaneHeader from './PaneHeader.vue'
+import PaneRestoreBanner from './PaneRestoreBanner.vue'
 import { useI18n } from '../../composables/useI18n'
+import type { RestoredPane } from '../../composables/useTabApi'
 
-const props = defineProps<{
-  layout: PaneLayout
-  activePaneId: string
-  broadcastMode: boolean
-  broadcastActivity: number
-  showHeader?: boolean
-  allowClose?: boolean
-  parentDirection?: 'horizontal' | 'vertical'
-}>()
+const props = withDefaults(
+  defineProps<{
+    layout: PaneLayout
+    activePaneId: string
+    broadcastMode: boolean
+    broadcastActivity: number
+    showHeader?: boolean
+    allowClose?: boolean
+    parentDirection?: 'horizontal' | 'vertical'
+    restoreContextMap?: Record<string, RestoredPane> | null
+  }>(),
+  {
+    showHeader: false,
+    allowClose: false,
+    parentDirection: undefined,
+    restoreContextMap: null,
+  }
+)
 
 const emit = defineEmits<{
   register: [paneId: string, el: any]
@@ -147,6 +167,8 @@ const emit = defineEmits<{
   linkActivate: []
   reorder: [sourcePaneId: string, targetPaneId: string, position: DropPosition]
   dividerDragEnd: []
+  restoreDismiss: [paneId: string]
+  split: [paneId: string, direction: 'horizontal' | 'vertical']
 }>()
 
 const { t } = useI18n()
