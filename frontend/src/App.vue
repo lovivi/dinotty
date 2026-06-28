@@ -530,7 +530,14 @@ function persistNow() {
     }
   })
   const activeIdx = tabs.value.findIndex((t) => t.paneId === activePaneId.value)
-  localStorage.setItem('dinotty_tabs', JSON.stringify({ tabs: state, activeIdx }))
+  localStorage.setItem(
+    'dinotty_tabs',
+    JSON.stringify({
+      tabs: state,
+      activeIdx,
+      activeProjectGroupId: session.activeProjectGroupId,
+    })
+  )
 }
 function persist() {
   if (persistTimer) clearTimeout(persistTimer)
@@ -627,7 +634,8 @@ type ProjectAction =
 async function onProjectAction(action: ProjectAction) {
   if (action.type === 'select') {
     session.setActiveProjectGroup(action.groupId)
-    if (activePaneId.value && !filteredTabs.value.some((t) => t.paneId === activePaneId.value)) {
+    const currentVisible = filteredTabs.value.some((t) => t.paneId === activePaneId.value)
+    if (!currentVisible) {
       const first = filteredTabs.value[0]
       if (first) {
         activePaneId.value = first.paneId
@@ -654,15 +662,31 @@ async function onProjectAction(action: ProjectAction) {
     }
     appSettings.project_groups.push(group)
     appSettings.default_project_group_id ??= group.id
-    // Auto-assign all ungrouped terminal tabs to the new group
+    // Auto-assign all ungrouped terminal tabs to the new group — both locally
+    // and on the backend, otherwise the move is lost on the next reload.
+    const autoAssigned: Array<{ paneId: string; workspaceRoots: string[] }> = []
     for (const tab of tabs.value) {
       if (tab.type === 'terminal' && !tab.groupId) {
         session.moveTabToProjectGroup(tab.paneId, group.id)
+        autoAssigned.push({
+          paneId: tab.paneId,
+          workspaceRoots: tab.workspaceRoots ?? [],
+        })
       }
     }
     session.setActiveProjectGroup(group.id)
     await settingsStore.save()
     persist()
+    for (const { paneId, workspaceRoots } of autoAssigned) {
+      try {
+        await apiUpdateTabMeta(paneId, {
+          group_id: group.id,
+          workspace_roots: workspaceRoots,
+        })
+      } catch (e) {
+        console.error('Failed to sync tab meta:', e)
+      }
+    }
     return
   }
   if (action.type === 'move-active') {
@@ -950,6 +974,30 @@ async function onLoginSuccess() {
   ui.setAuthenticated(true)
   await getApiBase()
   await settingsStore.load()
+  // Restore the last-active project so the user lands in the right context
+  // instead of always starting in "No Project". Prefer the localStorage value
+  // (last user choice); fall back to the first project ever created, then null.
+  let restoredProjectId: string | null = null
+  try {
+    const raw = localStorage.getItem('dinotty_tabs')
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (typeof parsed?.activeProjectGroupId === 'string') {
+        restoredProjectId = parsed.activeProjectGroupId
+      }
+    }
+  } catch {
+    /* ignore corrupt localStorage */
+  }
+  if (!restoredProjectId && appSettings.default_project_group_id) {
+    restoredProjectId = appSettings.default_project_group_id
+  }
+  if (restoredProjectId) {
+    const exists = appSettings.project_groups.some((g) => g.id === restoredProjectId)
+    if (exists) {
+      session.setActiveProjectGroup(restoredProjectId)
+    }
+  }
   await loadShellProfiles()
   await loadRestoreContexts()
   void loadAll()
