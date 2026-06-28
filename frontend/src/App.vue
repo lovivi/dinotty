@@ -625,6 +625,8 @@ type ProjectAction =
   | { type: 'select'; groupId: string | null }
   | { type: 'create' }
   | { type: 'move-active'; groupId: string | null }
+  | { type: 'rename'; groupId: string }
+  | { type: 'move-to'; groupId: string }
 
 async function onProjectAction(action: ProjectAction) {
   if (action.type === 'select') {
@@ -681,6 +683,35 @@ async function onProjectAction(action: ProjectAction) {
         console.error('Failed to sync tab meta:', e)
       }
     }
+    persist()
+    return
+  }
+  if (action.type === 'rename') {
+    const group = appSettings.project_groups.find((g) => g.id === action.groupId)
+    if (!group) return
+    const name = window.prompt('Rename project', group.name)?.trim()
+    if (!name || name === group.name) return
+    group.name = name
+    group.updated_at = Date.now()
+    await settingsStore.save()
+    persist()
+    return
+  }
+  if (action.type === 'move-to') {
+    if (!activePaneId.value) return
+    session.moveTabToProjectGroup(activePaneId.value, action.groupId)
+    const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
+    if (tab?.type === 'terminal') {
+      try {
+        await apiUpdateTabMeta(tab.paneId, {
+          group_id: action.groupId,
+          workspace_roots: tab.workspaceRoots ?? [],
+        })
+      } catch (e) {
+        console.error('Failed to sync tab meta:', e)
+      }
+    }
+    session.setActiveProjectGroup(action.groupId)
     persist()
   }
 }

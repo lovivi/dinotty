@@ -73,9 +73,22 @@
           v-for="group in projectGroups"
           :key="group.id"
           class="project-dropdown-item"
-          @click="emitProject({ type: 'select', groupId: group.id })"
         >
-          {{ group.name }}
+          <span class="project-group-name" @click="emitProject({ type: 'select', groupId: group.id })">{{ group.name }}</span>
+          <button
+            class="project-group-icon-btn"
+            title="Rename project"
+            @click.stop="emitProject({ type: 'rename', groupId: group.id })"
+          >
+            <Pencil :size="12" />
+          </button>
+          <button
+            class="project-group-icon-btn"
+            title="Move current tab here"
+            @click.stop="emitProject({ type: 'move-to', groupId: group.id })"
+          >
+            <ArrowRightLeft :size="12" />
+          </button>
         </div>
         <div class="new-menu-sep" />
         <div class="project-dropdown-item" @click="emitProject({ type: 'create' })">Create Project...</div>
@@ -186,7 +199,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount, nextTick, computed } from 'vue'
-import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard } from 'lucide-vue-next'
+import { X, Terminal, Puzzle, Columns2, Rows2, Radio, LayoutDashboard, Pencil, ArrowRightLeft } from 'lucide-vue-next'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
 
@@ -259,7 +272,7 @@ const emit = defineEmits<{
   activate: [paneId: string]
   close: [paneId: string]
   action: [type: 'new-tab' | 'split-h' | 'split-v' | 'broadcast' | { type: 'new-tab-profile'; profileId: string }]
-  'project-action': [action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null }]
+  'project-action': [action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null } | { type: 'rename'; groupId: string } | { type: 'move-to'; groupId: string }]
   reorder: [fromId: string, toId: string]
   'open-plugin': [pluginId: string]
   rename: [paneId: string, title: string]
@@ -332,9 +345,9 @@ function emitProfile(profileId: string) {
   newMenuOpen.value = false
 }
 
-function emitProject(action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null }) {
+function emitProject(action: { type: 'select'; groupId: string | null } | { type: 'create' } | { type: 'move-active'; groupId: string | null } | { type: 'rename'; groupId: string } | { type: 'move-to'; groupId: string }) {
+  if (action.type !== 'rename') projectMenuOpen.value = false
   emit('project-action', action)
-  projectMenuOpen.value = false
 }
 
 function onDocTouchStart(e: TouchEvent) {
@@ -629,6 +642,33 @@ onBeforeUnmount(() => {
 .new-menu-item:hover,
 .project-dropdown-item:hover {
   background: var(--bg-hover, #2a2a2a);
+}
+.project-group-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-group-icon-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.project-dropdown-item:hover .project-group-icon-btn {
+  opacity: 1;
+}
+.project-group-icon-btn:hover {
+  background: var(--bg-active, #444);
+  color: var(--text, #eee);
 }
 .new-menu-icon {
   flex-shrink: 0;
