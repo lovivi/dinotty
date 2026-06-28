@@ -126,7 +126,7 @@ fn pty_resize(
 #[tauri::command]
 fn pty_kill(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<(), String> {
     state.kill_and_remove(&pane_id);
-    state.broadcast_sync(&SyncMsg::TabClosed { pane_id: pane_id.clone() });
+    state.broadcast_sync(&SyncMsg::TabClosed { tab_id: pane_id.clone() });
     // Collect affected layouts before purging
     let before_layouts: Vec<(String, serde_json::Value)> =
         state.tab_layouts.iter().map(|e| (e.key().clone(), e.value().clone())).collect();
