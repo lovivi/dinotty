@@ -13,6 +13,8 @@ use rust_embed::Embed;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tower_http::cors::CorsLayer;
 
 use dinotty_server::auth;
@@ -187,8 +189,11 @@ async fn manifest_handler() -> impl IntoResponse {
 fn read_git_info() -> GitInfo {
     let version = option_env!("DINOTTY_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")).to_string();
 
-    let repo_url = std::process::Command::new("git")
-        .args(["remote", "get-url", "origin"])
+    let mut git_cmd = std::process::Command::new("git");
+    git_cmd.args(["remote", "get-url", "origin"]);
+    #[cfg(windows)]
+    git_cmd.creation_flags(0x08000000);
+    let repo_url = git_cmd
         .output()
         .ok()
         .filter(|o| o.status.success())

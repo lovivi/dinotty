@@ -2,6 +2,8 @@
 use axum::{response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -144,8 +146,11 @@ fn windows_profiles() -> Vec<ShellProfile> {
 
 #[cfg(windows)]
 fn command_exists(command: &str) -> bool {
-    std::process::Command::new("where.exe")
-        .arg(command)
+    let mut cmd = std::process::Command::new("where.exe");
+    cmd.arg(command);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000);
+    cmd
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)

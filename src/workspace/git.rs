@@ -6,6 +6,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use crate::session::SessionManager;
 
@@ -37,12 +39,13 @@ pub async fn workspace_git_status(
     Query(q): Query<PaneQuery>,
 ) -> impl IntoResponse {
     let root = try_res!(get_root(&manager, &q.pane_id));
-    let output = match tokio::task::spawn_blocking(move || {
-        std::process::Command::new("git")
+    let mut git_cmd = std::process::Command::new("git");
+    git_cmd
             .args(["status", "--porcelain"])
-            .current_dir(&root)
-            .output()
-    })
+            .current_dir(&root);
+    #[cfg(windows)]
+    git_cmd.creation_flags(0x08000000);
+    let output = match tokio::task::spawn_blocking(move || git_cmd.output())
     .await
     {
         Ok(Ok(o)) if o.status.success() => o,
@@ -102,10 +105,13 @@ pub async fn workspace_git_diff(
     let git_check = tokio::task::spawn_blocking({
         let root = root.clone();
         move || {
-            std::process::Command::new("git")
+            let mut git_cmd = std::process::Command::new("git");
+            git_cmd
                 .args(["rev-parse", "--git-dir"])
-                .current_dir(&root)
-                .output()
+                .current_dir(&root);
+            #[cfg(windows)]
+            git_cmd.creation_flags(0x08000000);
+            git_cmd.output()
         }
     })
     .await;
@@ -121,10 +127,13 @@ pub async fn workspace_git_diff(
         let root = root.clone();
         let rel = rel.to_string();
         move || {
-            std::process::Command::new("git")
+            let mut git_cmd = std::process::Command::new("git");
+            git_cmd
                 .args(["show", &format!("HEAD:{rel}")])
-                .current_dir(&root)
-                .output()
+                .current_dir(&root);
+            #[cfg(windows)]
+            git_cmd.creation_flags(0x08000000);
+            git_cmd.output()
         }
     })
     .await;
@@ -204,10 +213,13 @@ pub async fn workspace_git_stage_lines(
         let root = root.clone();
         let rel = rel.to_string();
         move || {
-            std::process::Command::new("git")
+            let mut git_cmd = std::process::Command::new("git");
+            git_cmd
                 .args(["show", &format!("HEAD:{rel}")])
-                .current_dir(&root)
-                .output()
+                .current_dir(&root);
+            #[cfg(windows)]
+            git_cmd.creation_flags(0x08000000);
+            git_cmd.output()
         }
     })
     .await;
@@ -277,10 +289,14 @@ pub async fn workspace_git_stage_lines(
         return Json(serde_json::json!({ "ok": true })).into_response();
     }
     let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("git")
+        let mut git_cmd = std::process::Command::new("git");
+        git_cmd
             .args(["apply", "--cached", "--unidiff-zero"])
             .stdin(std::process::Stdio::piped())
-            .current_dir(&root)
+            .current_dir(&root);
+        #[cfg(windows)]
+        git_cmd.creation_flags(0x08000000);
+        git_cmd
             .spawn()
             .and_then(|mut child| {
                 use std::io::Write;

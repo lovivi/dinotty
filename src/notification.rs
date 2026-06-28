@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::broadcast;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use crate::settings::SettingsState;
 
@@ -119,16 +121,19 @@ impl NotificationBroadcast {
             let env_body = body.to_string();
 
             tokio::spawn(async move {
-                let result = tokio::time::timeout(
-                    std::time::Duration::from_secs(30),
-                    tokio::process::Command::new("sh")
+                let mut hook_cmd = tokio::process::Command::new("sh");
+                hook_cmd
                         .arg("-c")
                         .arg(&cmd)
                         .env("DINOTTY_NOTIFICATION_TYPE", &env_type)
                         .env("DINOTTY_PANE_ID", &env_pane)
                         .env("DINOTTY_TITLE", &env_title)
-                        .env("DINOTTY_BODY", &env_body)
-                        .output(),
+                        .env("DINOTTY_BODY", &env_body);
+                #[cfg(windows)]
+                hook_cmd.creation_flags(0x08000000);
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    hook_cmd.output(),
                 )
                 .await;
                 match result {

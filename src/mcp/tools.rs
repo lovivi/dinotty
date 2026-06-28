@@ -12,6 +12,8 @@
 )]
 use serde::Serialize;
 use serde_json::Value;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
@@ -330,8 +332,11 @@ impl McpTools {
     }
 
     fn tool_git_status(&self, _args: Value) -> Result<String, String> {
-        let output = std::process::Command::new("git")
-            .args(["status", "--porcelain"])
+        let mut git_cmd = std::process::Command::new("git");
+        git_cmd.args(["status", "--porcelain"]);
+        #[cfg(windows)]
+        git_cmd.creation_flags(0x08000000);
+        let output = git_cmd
             .output()
             .map_err(|e| format!("git failed: {e}"))?;
         String::from_utf8(output.stdout).map_err(|e| format!("utf8 error: {e}"))
@@ -339,8 +344,11 @@ impl McpTools {
 
     fn tool_git_diff(&self, args: Value) -> Result<String, String> {
         let path = args.get("path").and_then(|v| v.as_str()).ok_or("Missing path")?;
-        let output = std::process::Command::new("git")
-            .args(["diff", path])
+        let mut git_cmd = std::process::Command::new("git");
+        git_cmd.args(["diff", path]);
+        #[cfg(windows)]
+        git_cmd.creation_flags(0x08000000);
+        let output = git_cmd
             .output()
             .map_err(|e| format!("git failed: {e}"))?;
         String::from_utf8(output.stdout).map_err(|e| format!("utf8 error: {e}"))

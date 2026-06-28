@@ -1,5 +1,7 @@
 use axum::{response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 const MAX_SYNTAX_CHECK_SIZE: usize = 512 * 1024;
 
@@ -85,14 +87,17 @@ fn parse_python_diagnostics(stderr: &str, content: &str) -> Vec<SyntaxDiagnostic
 fn check_python_syntax(content: &str) -> Vec<SyntaxDiagnostic> {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let Ok(mut child) = Command::new("python3")
+    let mut py_cmd = Command::new("python3");
+    py_cmd
         .arg("-m")
         .arg("py_compile")
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    py_cmd.creation_flags(0x08000000);
+    let Ok(mut child) = py_cmd.spawn()
     else {
         return vec![];
     };
@@ -147,12 +152,16 @@ fn check_go_syntax(content: &str) -> Vec<SyntaxDiagnostic> {
     if std::fs::write(tmp.path(), content.as_bytes()).is_err() {
         return vec![];
     }
-    let Ok(output) = Command::new("go")
+    let mut go_cmd = Command::new("go");
+    go_cmd
         .args(["tool", "compile", "-e", "-p", "main"])
         .arg(tmp.path())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    go_cmd.creation_flags(0x08000000);
+    let Ok(output) = go_cmd
         .spawn()
         .and_then(std::process::Child::wait_with_output)
     else {

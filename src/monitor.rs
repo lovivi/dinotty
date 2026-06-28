@@ -15,6 +15,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use sysinfo::{Disks, Networks, System};
 use tokio::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::{interval, Duration};
 use tracing::{debug, warn};
@@ -294,11 +296,14 @@ fn parse_memory(s: &str) -> u64 {
 }
 
 async fn collect_gpu() -> Option<Vec<GpuData>> {
-    let output = match Command::new("nvidia-smi")
-        .args([
+    let mut nvidia_cmd = Command::new("nvidia-smi");
+    nvidia_cmd.args([
             "--query-gpu=name,uuid,utilization.gpu,utilization.memory,temperature.gpu,power.draw,power.limit,fan.speed,memory.used,memory.total",
             "--format=csv,noheader",
-        ])
+        ]);
+    #[cfg(windows)]
+    nvidia_cmd.creation_flags(0x08000000);
+    let output = match nvidia_cmd
         .output()
         .await
     {
