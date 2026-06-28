@@ -2,11 +2,16 @@
   <div
     v-if="visible"
     class="inline-autocomplete"
-    :style="{ left: cursorX + 'px', top: cursorY + 'px' }"
+    :style="{
+      left: cursorX + 'px',
+      top: cursorY + 'px',
+      fontSize: fontSize + 'px',
+      fontFamily: fontFamily,
+    }"
     @mousedown.prevent
   >
     <span class="autocomplete-suggestion">{{ completion }}</span>
-    <kbd class="autocomplete-hint">Tab</kbd>
+    <kbd class="autocomplete-hint">→ / Tab</kbd>
   </div>
 </template>
 
@@ -19,6 +24,8 @@ const props = defineProps<{
   cursorX: number
   cursorY: number
   visible: boolean
+  fontSize?: number
+  fontFamily?: string
 }>()
 
 const completion = computed(() => {
@@ -26,8 +33,13 @@ const completion = computed(() => {
   if (props.suggestion.startsWith(props.typedText)) {
     return props.suggestion.substring(props.typedText.length)
   }
-  return ''
+  // Fallback: show the whole suggestion (typed text may not be a literal prefix,
+  // e.g. contains-based match in autocomplete composable)
+  return props.suggestion
 })
+
+const fontSize = computed(() => props.fontSize ?? 14)
+const fontFamily = computed(() => props.fontFamily ?? 'monospace')
 </script>
 
 <style scoped>
@@ -37,7 +49,6 @@ const completion = computed(() => {
   pointer-events: none;
   display: flex;
   align-items: center;
-  font-family: var(--font-mono, monospace);
   line-height: 1;
   white-space: nowrap;
   opacity: 0;

@@ -18,6 +18,8 @@
       :typed-text="autocomplete.typedPrefix.value"
       :cursor-x="autocomplete.cursorPixelX.value"
       :cursor-y="autocomplete.cursorPixelY.value"
+      :font-size="autocomplete.cursorFontSize.value"
+      :font-family="autocomplete.cursorFontFamily.value"
       :visible="autocomplete.visible.value"
     />
   </div>
@@ -34,6 +36,7 @@
     @select-all="onMenuSelectAll"
     @open-file="onMenuOpenFile"
     @open-link="onMenuOpenLink"
+    @split="onMenuSplit"
   />
   <SelectionHandles
     :visible="handlesVisible"
@@ -68,6 +71,7 @@ const emit = defineEmits<{
   previewLink: [url: string]
   linkActivate: []
   input: [data: string]
+  split: [direction: 'horizontal' | 'vertical']
 }>()
 
 const wrapperRef = ref<HTMLElement>()
@@ -165,6 +169,10 @@ function onMenuOpenFile(path: string) {
 
 function onMenuOpenLink(url: string) {
   emit('previewLink', url)
+}
+
+function onMenuSplit(direction: 'horizontal' | 'vertical') {
+  emit('split', direction)
 }
 
 // Cached cell dimensions for touch selection
