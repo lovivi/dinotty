@@ -75,6 +75,3 @@ unwrap_used = "warn"
 expect_used = "warn"
 
 [dev-dependencies]
-
-[patch.crates-io]
-portable-pty = { path = "vendor/portable-pty" }
