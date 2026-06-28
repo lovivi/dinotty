@@ -22,7 +22,7 @@ export function useSyncWebSocket(opts: {
 }) {
   const { termRefs, persist, focusActive, newTab } = opts
   const session = useSessionStore()
-  const { tabs, activePaneId } = storeToRefs(session)
+  const { tabs, activePaneId, filteredTabs } = storeToRefs(session)
   const ui = useUiStore()
   const { syncConnected } = storeToRefs(ui)
 
@@ -193,7 +193,13 @@ export function useSyncWebSocket(opts: {
         }
 
         if (!activePaneId.value || !tabs.value.some((t) => t.paneId === activePaneId.value)) {
-          if (tabs.value.length > 0) {
+          // Prefer a tab visible under the current project filter
+          const visible = filteredTabs.value
+          if (visible.length > 0) {
+            activePaneId.value = visible[0].paneId
+          } else if (tabs.value.length > 0) {
+            // No visible tabs — reset filter so tabs are visible
+            session.setActiveProjectGroup(null)
             activePaneId.value = tabs.value[0].paneId
           }
         }

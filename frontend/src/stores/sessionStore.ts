@@ -29,6 +29,28 @@ export const useSessionStore = defineStore('session', () => {
     }))
   )
 
+  /** Tabs filtered by active project group (null = show all) */
+  const filteredTabs = computed(() => {
+    if (!activeProjectGroupId.value) return tabs.value
+    return tabs.value.filter((t) => {
+      if (t.type !== 'terminal') return true // always show plugin tabs
+      return (t as TerminalTab).groupId === activeProjectGroupId.value
+    })
+  })
+
+  /** Filtered tab list for TabBar component */
+  const filteredTabList = computed<TabInfo[]>(() =>
+    filteredTabs.value.map((t, i) => ({
+      paneId: t.paneId,
+      title:
+        t.type === 'terminal'
+          ? (t.customTitle ?? findLeaf(t.layout, t.activePaneId)?.title ?? 'Terminal')
+          : t.title,
+      index: i + 1,
+      type: t.type,
+    }))
+  )
+
   /** Type of the currently active tab */
   const activeTabType = computed(() => activeTab.value?.type ?? 'terminal')
 
@@ -145,6 +167,8 @@ export const useSessionStore = defineStore('session', () => {
     // Getters
     activeTab,
     tabList,
+    filteredTabs,
+    filteredTabList,
     activeTabType,
     isBroadcastActive,
     canBroadcast,

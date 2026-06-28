@@ -3,7 +3,7 @@
   <LoginPage v-else-if="!authenticated" @success="onLoginSuccess" />
   <div v-else id="app-root">
     <TabBar
-      :tabs="tabList"
+      :tabs="filteredTabList"
       :active-pane-id="activePaneId"
       :indicators="notif.unreadByPane"
       :plugins="pluginList"
@@ -75,7 +75,7 @@
 
     <div id="tab-content" @touchend="onTerminalTouch">
       <div
-        v-for="tab in tabs"
+        v-for="tab in filteredTabs"
         :key="tabKey(tab)"
         class="tab-page"
         :class="{
@@ -279,7 +279,7 @@ import type { ProjectGroup } from './composables/useSettings'
 
 // ── Stores ──────────────────────────────────────────────────────
 const session = useSessionStore()
-const { tabs, activePaneId, tabList, activeTabType, isBroadcastActive, canBroadcast, paneLabels } =
+const { tabs, activePaneId, filteredTabs, filteredTabList, activeTabType, isBroadcastActive, canBroadcast, paneLabels } =
   storeToRefs(session)
 
 const ui = useUiStore()
@@ -346,7 +346,7 @@ const isLandscape = ref(window.innerWidth > window.innerHeight)
 const overviewOpen = ref(false)
 const overviewCards = ref<TabCard[]>([])
 const currentTabIndex = computed(() =>
-  tabs.value.findIndex((t) => t.paneId === activePaneId.value) + 1
+  filteredTabs.value.findIndex((t) => t.paneId === activePaneId.value) + 1
 )
 const currentTabTitle = computed(() => {
   const tab = tabs.value.find((t) => t.paneId === activePaneId.value)
@@ -629,6 +629,15 @@ type ProjectAction =
 async function onProjectAction(action: ProjectAction) {
   if (action.type === 'select') {
     session.setActiveProjectGroup(action.groupId)
+    if (activePaneId.value && !filteredTabs.value.some((t) => t.paneId === activePaneId.value)) {
+      const first = filteredTabs.value[0]
+      if (first) {
+        activePaneId.value = first.paneId
+      } else if (action.groupId) {
+        // Switching to an empty group — create a tab in it
+        nextTick(() => newTab())
+      }
+    }
     return
   }
   if (action.type === 'create') {
@@ -647,8 +656,15 @@ async function onProjectAction(action: ProjectAction) {
     }
     appSettings.project_groups.push(group)
     appSettings.default_project_group_id ??= group.id
+    // Auto-assign all ungrouped terminal tabs to the new group
+    for (const tab of tabs.value) {
+      if (tab.type === 'terminal' && !tab.groupId) {
+        session.moveTabToProjectGroup(tab.paneId, group.id)
+      }
+    }
     session.setActiveProjectGroup(group.id)
     await settingsStore.save()
+    persist()
     return
   }
   if (action.type === 'move-active') {
@@ -790,8 +806,18 @@ async function closeTab(tabId: string) {
   }
 
   if (activePaneId.value === tabId) {
-    const newIdx = Math.min(idx, tabs.value.length - 1)
-    activePaneId.value = tabs.value[newIdx].paneId
+    // Prefer a tab visible under the current project filter
+    const visible = filteredTabs.value
+    if (visible.length > 0) {
+      const visibleIdx = visible.findIndex((t) => t.paneId === tabId)
+      const newVisibleIdx = Math.min(visibleIdx >= 0 ? visibleIdx : 0, visible.length - 1)
+      activePaneId.value = visible[newVisibleIdx].paneId
+    } else if (tabs.value.length > 0) {
+      // No visible tabs — reset filter so the user sees something
+      session.setActiveProjectGroup(null)
+      const newIdx = Math.min(idx, tabs.value.length - 1)
+      activePaneId.value = tabs.value[newIdx].paneId
+    }
   }
 
   persist()
@@ -1192,9 +1218,9 @@ function onGlobalKeydown(e: KeyboardEvent) {
 
   if (!e.shiftKey && e.key >= '1' && e.key <= '9') {
     const idx = parseInt(e.key) - 1
-    if (idx < tabs.value.length) {
+    if (idx < filteredTabs.value.length) {
       e.preventDefault()
-      activateTab(tabs.value[idx].paneId)
+      activateTab(filteredTabs.value[idx].paneId)
     }
   }
 }

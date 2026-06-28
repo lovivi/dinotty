@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use base64::Engine;
 use dinotty_server::pty;
 use dinotty_server::restore_state;
