@@ -601,6 +601,11 @@ async function newTab(profileId?: string, groupIdOverride?: string | null) {
     nextTick(() => focusActive())
   } catch (e) {
     console.error('Failed to create tab:', e)
+    notif.pushToast({
+      type: 'error',
+      title: t('palette.newTab') + ' failed',
+      body: String((e as Error)?.message ?? e),
+    })
   }
 }
 
@@ -689,6 +694,11 @@ async function onProjectAction(action: ProjectAction) {
       await settingsStore.save()
     } catch (e) {
       console.error('Failed to save project:', e)
+      notif.pushToast({
+        type: 'error',
+        title: t('project.error.createFailed'),
+        body: String((e as Error)?.message ?? e),
+      })
       const idx = appSettings.project_groups.findIndex((g) => g.id === group.id)
       if (idx !== -1) appSettings.project_groups.splice(idx, 1)
       if (appSettings.default_project_group_id === group.id) {
@@ -717,7 +727,7 @@ async function onProjectAction(action: ProjectAction) {
       }
     }
     if (!allMetaOk) {
-      console.warn('Some tab meta syncs failed; will reconcile on next reload')
+      notif.pushToast({ type: 'warning', title: t('project.error.syncPartial') })
     }
     persist()
     return
@@ -739,6 +749,11 @@ async function onProjectAction(action: ProjectAction) {
       })
     } catch (e) {
       console.error('Failed to sync tab meta:', e)
+      notif.pushToast({
+        type: 'error',
+        title: t('project.error.moveFailed'),
+        body: String((e as Error)?.message ?? e),
+      })
       // Roll back local change so UI doesn't lie.
       session.moveTabToProjectGroup(tabId, originalGroup)
       return
@@ -758,6 +773,11 @@ async function onProjectAction(action: ProjectAction) {
       await settingsStore.save()
     } catch (e) {
       console.error('Failed to rename project:', e)
+      notif.pushToast({
+        type: 'error',
+        title: t('project.error.renameFailed'),
+        body: String((e as Error)?.message ?? e),
+      })
       group.name = oldName
       return
     }
@@ -779,6 +799,11 @@ async function onProjectAction(action: ProjectAction) {
       })
     } catch (e) {
       console.error('Failed to sync tab meta:', e)
+      notif.pushToast({
+        type: 'error',
+        title: t('project.error.moveFailed'),
+        body: String((e as Error)?.message ?? e),
+      })
       session.moveTabToProjectGroup(tabId, originalGroup)
       return
     }
@@ -813,7 +838,8 @@ async function onProjectAction(action: ProjectAction) {
     if (appSettings.default_project_group_id === action.groupId) {
       appSettings.default_project_group_id = null
     }
-    if (session.activeProjectGroupId === action.groupId) {
+    const wasActive = session.activeProjectGroupId === action.groupId
+    if (wasActive) {
       session.setActiveProjectGroup(null)
     }
 
@@ -821,9 +847,15 @@ async function onProjectAction(action: ProjectAction) {
       await settingsStore.save()
     } catch (e) {
       console.error('Failed to save after delete:', e)
-      // Roll back
+      notif.pushToast({
+        type: 'error',
+        title: t('project.error.deleteFailed'),
+        body: String((e as Error)?.message ?? e),
+      })
+      // Roll back EVERYTHING we changed locally
       appSettings.project_groups.splice(idx, 0, group)
       if (group.id) appSettings.default_project_group_id = group.id
+      if (wasActive) session.setActiveProjectGroup(action.groupId)
       for (const { tabId } of affected) {
         session.moveTabToProjectGroup(tabId, action.groupId)
       }
@@ -843,7 +875,7 @@ async function onProjectAction(action: ProjectAction) {
       }
     }
     if (!allMetaOk) {
-      console.warn('Some tab meta syncs failed after delete; will reconcile on next reload')
+      notif.pushToast({ type: 'warning', title: t('project.error.syncPartial') })
     }
     persist()
   }

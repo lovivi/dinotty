@@ -117,6 +117,13 @@ function getNotifConfig() {
   return settings.notification
 }
 
+function pushItem(item: NotificationItem) {
+  notifications.value.unshift(item)
+  if (notifications.value.length > 100) {
+    notifications.value.length = 100
+  }
+}
+
 function handleEvent(event: {
   type: string
   pane_id: string
@@ -151,10 +158,7 @@ function handleEvent(event: {
     body,
     timestamp: Date.now(),
   }
-  notifications.value.unshift(item)
-  if (notifications.value.length > 100) {
-    notifications.value.length = 100
-  }
+  pushItem(item)
 
   // Track unread per pane (highest severity)
   const current = unreadByPane[event.pane_id]
@@ -251,6 +255,16 @@ export function useNotification() {
     panelVisible,
     unreadByPane,
     unreadCount,
+    pushToast(opts: { type?: NotificationType; title: string; body?: string; paneId?: string }) {
+      pushItem({
+        id: genId(),
+        type: opts.type ?? 'info',
+        paneId: opts.paneId ?? '',
+        title: opts.title,
+        body: opts.body ?? '',
+        timestamp: Date.now(),
+      })
+    },
     dismissOne(id: string) {
       const item = notifications.value.find((n) => n.id === id)
       notifications.value = notifications.value.filter((n) => n.id !== id)

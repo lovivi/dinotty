@@ -380,6 +380,11 @@ const messages: Record<Locale, Record<string, string>> = {
       'Delete project "{name}"? Its {n} tab(s) will move to No Project.',
     'project.deleteTitle': 'Delete project',
     'project.delete': 'Delete',
+    'project.error.createFailed': 'Failed to create project',
+    'project.error.renameFailed': 'Failed to rename project',
+    'project.error.deleteFailed': 'Failed to delete project',
+    'project.error.moveFailed': 'Failed to move tab to project',
+    'project.error.syncPartial': 'Some tab metadata failed to sync; will reconcile on next reload',
   },
   zh: {
     'app.settings': '设置',
@@ -750,6 +755,11 @@ const messages: Record<Locale, Record<string, string>> = {
     'project.confirmDeleteWithTabs': '删除项目"{name}"？该项目的 {n} 个标签页将移至"无项目"。',
     'project.deleteTitle': '删除项目',
     'project.delete': '删除',
+    'project.error.createFailed': '创建项目失败',
+    'project.error.renameFailed': '重命名项目失败',
+    'project.error.deleteFailed': '删除项目失败',
+    'project.error.moveFailed': '移动标签页到项目失败',
+    'project.error.syncPartial': '部分标签页元数据同步失败，下次重载时会自动修复',
   },
 }
 
