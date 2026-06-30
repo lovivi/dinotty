@@ -23,7 +23,7 @@ pub struct HistoryState {
 }
 
 struct HistoryInner {
-    entries: RwLock<HashMap<String, usize>>,
+    entries: RwLock<HashMap<String, HistoryEntry>>,
     deleted: RwLock<HashSet<String>>,
     shell_type: String,
     history_path: PathBuf,
@@ -31,10 +31,18 @@ struct HistoryInner {
     broadcast_tx: broadcast::Sender<String>,
 }
 
+#[derive(Clone, Copy)]
+struct HistoryEntry {
+    frequency: usize,
+    last_used_at: i64, // unix seconds; tiebreaker for ranking when frequencies are equal
+}
+
 #[derive(Serialize, Clone)]
 pub struct SuggestionItem {
     pub command: String,
     pub frequency: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -96,7 +104,14 @@ impl HistoryState {
             }
         };
 
-        let entries = parse_history(&self.inner.shell_type, &content);
+        let mtime = tokio::fs::metadata(&self.inner.history_path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or_else(now_unix, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+
+        let entries = parse_history(&self.inner.shell_type, &content, mtime);
         info!("Loaded {} unique history entries from {:?}", entries.len(), self.inner.history_path);
         *self.inner.entries.write().await = entries;
         self.broadcast_top().await;
@@ -150,7 +165,14 @@ impl HistoryState {
             Err(_) => return,
         };
 
-        let mut entries = parse_history(&self.inner.shell_type, &content);
+        let mtime = tokio::fs::metadata(&self.inner.history_path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or_else(now_unix, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+
+        let mut entries = parse_history(&self.inner.shell_type, &content, mtime);
         let deleted = self.inner.deleted.read().await;
         for cmd in deleted.iter() {
             entries.remove(cmd);
@@ -174,14 +196,30 @@ impl HistoryState {
             Some(p) if !p.is_empty() => entries
                 .iter()
                 .filter(|(cmd, _)| cmd.contains(p))
-                .map(|(cmd, &freq)| SuggestionItem { command: cmd.clone(), frequency: freq })
+                .map(|(cmd, &e)| SuggestionItem {
+                    command: cmd.clone(),
+                    frequency: e.frequency,
+                    last_used_at: Some(e.last_used_at),
+                })
                 .collect(),
             _ => entries
                 .iter()
-                .map(|(cmd, &freq)| SuggestionItem { command: cmd.clone(), frequency: freq })
+                .map(|(cmd, &e)| SuggestionItem {
+                    command: cmd.clone(),
+                    frequency: e.frequency,
+                    last_used_at: Some(e.last_used_at),
+                })
                 .collect(),
         };
-        results.sort_by_key(|b| std::cmp::Reverse(b.frequency));
+        // Primary: frequency desc. Tiebreaker: recency desc (more recently
+        // used wins when commands are equally frequent). This matches the
+        // fish/zsh-autosuggestions behaviour where recent commands outrank
+        // older ones of the same frequency.
+        results.sort_by(|a, b| {
+            b.frequency
+                .cmp(&a.frequency)
+                .then(b.last_used_at.unwrap_or(0).cmp(&a.last_used_at.unwrap_or(0)))
+        });
         results.truncate(limit);
         results
     }
@@ -196,7 +234,15 @@ impl HistoryState {
             return;
         }
         drop(deleted);
-        *self.inner.entries.write().await.entry(cmd).or_insert(0) += 1;
+        let now = now_unix();
+        let mut entries = self.inner.entries.write().await;
+        let entry = entries.entry(cmd).or_insert(HistoryEntry {
+            frequency: 0,
+            last_used_at: now,
+        });
+        entry.frequency += 1;
+        entry.last_used_at = now;
+        drop(entries);
         self.broadcast_top().await;
     }
 
@@ -221,8 +267,17 @@ fn get_history_path(shell_type: &str) -> PathBuf {
     }
 }
 
-fn parse_history(shell_type: &str, content: &str) -> HashMap<String, usize> {
+fn parse_history(shell_type: &str, content: &str, default_mtime: i64) -> HashMap<String, HistoryEntry> {
     let mut entries = HashMap::new();
+    let bump = |entries: &mut HashMap<String, HistoryEntry>, cmd: String| {
+        if !cmd.is_empty() {
+            let entry = entries.entry(cmd).or_insert(HistoryEntry {
+                frequency: 0,
+                last_used_at: default_mtime,
+            });
+            entry.frequency += 1;
+        }
+    };
     match shell_type {
         "zsh" => {
             let mut continuation = String::new();
@@ -235,10 +290,7 @@ fn parse_history(shell_type: &str, content: &str) -> HashMap<String, usize> {
                     }
                     continuation.push('\n');
                     continuation.push_str(line);
-                    let cmd = continuation.trim().to_string();
-                    if !cmd.is_empty() {
-                        *entries.entry(cmd).or_insert(0) += 1;
-                    }
+                    bump(&mut entries, continuation.trim().to_string());
                     continuation.clear();
                     continue;
                 }
@@ -254,28 +306,123 @@ fn parse_history(shell_type: &str, content: &str) -> HashMap<String, usize> {
                     continue;
                 }
 
-                let cmd = raw.trim();
-                if !cmd.is_empty() {
-                    *entries.entry(cmd.to_string()).or_insert(0) += 1;
-                }
+                bump(&mut entries, raw.trim().to_string());
             }
             if !continuation.is_empty() {
-                let cmd = continuation.trim().to_string();
-                if !cmd.is_empty() {
-                    *entries.entry(cmd).or_insert(0) += 1;
-                }
+                bump(&mut entries, continuation.trim().to_string());
             }
         }
         _ => {
             for line in content.lines() {
-                let cmd = line.trim();
-                if !cmd.is_empty() {
-                    *entries.entry(cmd.to_string()).or_insert(0) += 1;
-                }
+                bump(&mut entries, line.trim().to_string());
             }
         }
     }
     entries
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_bash_history_counts_frequencies() {
+        let content = "ls -la\ngit status\ngit push\nls -la\ngit status\n";
+        let entries = parse_history("bash", content, 1_000);
+        assert_eq!(entries.get("ls -la").unwrap().frequency, 2);
+        assert_eq!(entries.get("git status").unwrap().frequency, 2);
+        assert_eq!(entries.get("git push").unwrap().frequency, 1);
+        // All entries seeded with the supplied mtime on first load.
+        assert!(entries.values().all(|e| e.last_used_at == 1_000));
+    }
+
+    #[test]
+    fn parse_zsh_history_strips_metadata_line() {
+        // zsh extended history format: ": <ts>:0;<cmd>"
+        let content = ": 1700000000:0;git pull\n: 1700000001:0;git push\n";
+        let entries = parse_history("zsh", content, 1_000);
+        assert_eq!(entries.get("git pull").unwrap().frequency, 1);
+        assert_eq!(entries.get("git push").unwrap().frequency, 1);
+    }
+
+    #[test]
+    fn parse_history_merges_continuation_lines() {
+        // zsh extended format with backslash-continuation.
+        // The first line ends with `\`, the second is `world`. After
+        // continuation merging the entry is `echo hello \nworld` (with a
+        // literal newline char between `hello` and `world`).
+        let content = ": 1700000000:0;echo hello \\\nworld\n";
+        let entries = parse_history("zsh", content, 1_000);
+        assert_eq!(entries.len(), 1);
+        let expected = "echo hello \nworld".to_string();
+        assert!(entries.contains_key(&expected));
+    }
+
+    #[test]
+    fn recency_tiebreaker_picks_more_recent() {
+        // Build entries manually so we can pin last_used_at.
+        let mtime = 1_000;
+        let mut entries: HashMap<String, HistoryEntry> = HashMap::new();
+        entries.insert(
+            "git status".into(),
+            HistoryEntry { frequency: 5, last_used_at: mtime },
+        );
+        entries.insert(
+            "git pull".into(),
+            HistoryEntry { frequency: 5, last_used_at: mtime + 100 },
+        );
+        // Simulate the sort key the way `query()` does.
+        let mut list: Vec<_> = entries
+            .iter()
+            .map(|(cmd, e)| SuggestionItem {
+                command: cmd.clone(),
+                frequency: e.frequency,
+                last_used_at: Some(e.last_used_at),
+            })
+            .collect();
+        list.sort_by(|a, b| {
+            b.frequency
+                .cmp(&a.frequency)
+                .then(b.last_used_at.unwrap_or(0).cmp(&a.last_used_at.unwrap_or(0)))
+        });
+        // Same frequency → more recent wins.
+        assert_eq!(list[0].command, "git pull");
+        assert_eq!(list[1].command, "git status");
+    }
+
+    #[test]
+    fn frequency_still_beats_recency() {
+        // Even if `git status` is older, much higher frequency should win.
+        let mut entries: HashMap<String, HistoryEntry> = HashMap::new();
+        entries.insert(
+            "git status".into(),
+            HistoryEntry { frequency: 100, last_used_at: 1_000 },
+        );
+        entries.insert(
+            "git pull".into(),
+            HistoryEntry { frequency: 5, last_used_at: 9_999 },
+        );
+        let mut list: Vec<_> = entries
+            .iter()
+            .map(|(cmd, e)| SuggestionItem {
+                command: cmd.clone(),
+                frequency: e.frequency,
+                last_used_at: Some(e.last_used_at),
+            })
+            .collect();
+        list.sort_by(|a, b| {
+            b.frequency
+                .cmp(&a.frequency)
+                .then(b.last_used_at.unwrap_or(0).cmp(&a.last_used_at.unwrap_or(0)))
+        });
+        assert_eq!(list[0].command, "git status");
+    }
 }
 
 pub async fn get_history(

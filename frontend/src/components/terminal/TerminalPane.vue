@@ -14,13 +14,18 @@
       @close="searchVisible = false"
     />
     <InlineAutocomplete
-      :suggestion="autocomplete.currentSuggestion.value"
+      :suggestion="autocomplete.suggestions.value[0] ?? ''"
+      :suggestions="autocomplete.suggestions.value"
+      :selected-idx="autocomplete.selectedIdx.value"
       :typed-text="autocomplete.typedPrefix.value"
       :cursor-x="autocomplete.cursorPixelX.value"
       :cursor-y="autocomplete.cursorPixelY.value"
       :font-size="autocomplete.cursorFontSize.value"
       :font-family="autocomplete.cursorFontFamily.value"
+      :line-height="fontLineHeight"
       :visible="autocomplete.visible.value"
+      @hover="autocomplete.setSelected"
+      @accept="autocomplete.accept"
     />
   </div>
   <TerminalContextMenu
@@ -50,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { TerminalInstance } from '../../composables/useTerminal'
 import SearchBar from './SearchBar.vue'
 import TerminalContextMenu from './TerminalContextMenu.vue'
@@ -78,6 +83,13 @@ const wrapperRef = ref<HTMLElement>()
 let terminal: TerminalInstance | null = null
 const searchVisible = ref(false)
 const autocomplete = useAutocomplete()
+// Cell height in px — used by InlineAutocomplete to offset the dropdown
+// below the prompt row without measuring the DOM on every keystroke.
+const fontLineHeight = computed(() => {
+  if (!terminal?.xterm) return 18
+  const fs = terminal.xterm.options.fontSize ?? 14
+  return terminal.xterm.options.lineHeight ?? fs * 1.2
+})
 
 // Context menu state
 const menuVisible = ref(false)

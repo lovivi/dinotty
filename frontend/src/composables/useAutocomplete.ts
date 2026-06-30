@@ -2,11 +2,35 @@ import { ref } from 'vue'
 import type { TerminalInstance } from './useTerminal'
 import { useHistory } from './useHistory'
 
+/**
+ * Inline ghost-text autocomplete, modelled after fish / zsh-autosuggestions.
+ *
+ *  - The server ranks history entries by frequency then recency (see
+ *    `src/history.rs::query()`); the client trusts that ordering and keeps
+ *    the top suggestions.
+ *  - Suggestions 1..N are shown in a dropdown; suggestion 0 is also painted
+ *    inline as ghost text after the cursor.
+ *  - Accept: Tab, →, End, mouse click on a dropdown row.
+ *  - Cycle:   Shift+Tab (prev), Ctrl+F (next). Cycling swaps the inline
+ *    ghost to another suggestion without accepting it.
+ *  - Dismiss: Esc, Ctrl+C, any keystroke that mutates the prefix so the
+ *    next `updateFromBuffer()` produces a different prefix.
+ *
+ * Multi-pane safety: this composable is called inside each `TerminalPane`'s
+ * `setup()`, so every pane gets its own instance. `bind()` is called once
+ * per pane and never hoisted.
+ */
 export function useAutocomplete() {
   const { fetchSuggestions } = useHistory()
 
   const visible = ref(false)
-  const currentSuggestion = ref('')
+  /** Ordered suggestions, index 0 is the inline ghost. Server order is
+   *  frequency desc then recency desc; the client re-sorts prefix matches
+   *  ahead of contains matches. */
+  const suggestions = ref<string[]>([])
+  /** Which suggestion in the dropdown is highlighted. Always 0 means the
+   *  inline ghost; higher values come from Ctrl+F / Shift+Tab / mouse hover. */
+  const selectedIdx = ref(0)
   const typedPrefix = ref('')
   const cursorPixelX = ref(0)
   const cursorPixelY = ref(0)
@@ -20,8 +44,16 @@ export function useAutocomplete() {
   let rafHandle: number | null = null
   let cleanupViewport: (() => void) | null = null
 
+  /** Number of dropdown rows we show below the inline ghost. Server returns
+   *  up to 20; the dropdown caps at this so it never covers half the screen. */
+  const DROPDOWN_MAX = 8
+
+  /** Exposed for tests; production code reads this off the terminal instance. */
+  let onBeforeSendHook: ((data: string) => boolean) | null = null
+
   function bind(term: TerminalInstance) {
     terminal = term
+    onBeforeSendHook = onBeforeSend
     term.onBeforeSend = onBeforeSend
     primeHistory()
     attachViewportListeners()
@@ -39,23 +71,52 @@ export function useAutocomplete() {
       return false
     }
 
-    // Right arrow (CSI C / SS3 C) — accept current suggestion
+    // → arrow (CSI C / SS3 C) — accept current selection
     if (data === '\x1b[C' || data === '\x1bOC') {
-      if (visible.value && currentSuggestion.value) {
+      if (visible.value && currentSelected()) {
         accept()
         return true
       }
       return false
     }
 
+    // Tab — accept current selection
     if (data === '\t') {
-      if (visible.value && currentSuggestion.value) {
+      if (visible.value && currentSelected()) {
         accept()
         return true
       }
       return false
     }
 
+    // End (CSI F / SS3 F) — fish/zsh convention: jump to end and accept
+    if (data === '\x1b[F' || data === '\x1bOF') {
+      if (visible.value && currentSelected()) {
+        accept()
+        return true
+      }
+      return false
+    }
+
+    // Ctrl+F — cycle to next suggestion without accepting
+    if (data === '\x06') {
+      if (visible.value && suggestions.value.length > 1) {
+        selectNext()
+        return true
+      }
+      return false
+    }
+
+    // Shift+Tab — cycle to previous suggestion without accepting
+    if (data === '\x1b[Z') {
+      if (visible.value && suggestions.value.length > 1) {
+        selectPrev()
+        return true
+      }
+      return false
+    }
+
+    // Esc — dismiss without accepting
     if (data === '\x1b') {
       if (visible.value) {
         dismiss()
@@ -64,13 +125,22 @@ export function useAutocomplete() {
       return false
     }
 
+    // Enter — accept and submit; dismiss the dropdown
     if (data === '\r') {
       if (visible.value) dismiss()
       return false
     }
 
+    // Any other keystroke — let it through to the shell, then re-evaluate
+    // the prefix. `updateFromBuffer()` hides the ghost when prefix is empty
+    // and refetches suggestions when the prefix changed.
     setTimeout(() => updateFromBuffer(), 0)
     return false
+  }
+
+  /** The suggestion currently highlighted (inline ghost if 0, dropdown row otherwise). */
+  function currentSelected(): string {
+    return suggestions.value[selectedIdx.value] ?? ''
   }
 
   function updateFromBuffer() {
@@ -108,22 +178,43 @@ export function useAutocomplete() {
     void (async () => {
       const items = await fetchSuggestions(prefix)
       if (lastPrefix !== prefix) return
-      const starts = items
-        .filter((it) => it.command.length > prefix.length && it.command.startsWith(prefix))
-        .sort((a, b) => a.command.length - b.command.length || b.frequency - a.frequency)
-      const fallback = items
-        .filter(
-          (it) => it.command.length > prefix.length && !it.command.startsWith(prefix) && it.command.includes(prefix)
-        )
-        .sort((a, b) => a.command.length - b.command.length || b.frequency - a.frequency)
-      const match = starts[0] ?? fallback[0]
-      if (match) {
-        currentSuggestion.value = match.command
+      // Server returns Top N ranked by (frequency desc, recency desc). Split
+      // into startsWith + contains-fallback so prefix-aligned matches always
+      // outrank fuzzy ones.
+      const cmds = items.map((it) => it.command)
+      const starts = cmds.filter((c) => c.length > prefix.length && c.startsWith(prefix))
+      const fallback = cmds.filter(
+        (c) => c.length > prefix.length && !c.startsWith(prefix) && c.includes(prefix)
+      )
+      const ranked = [...starts, ...fallback]
+      const top = ranked.slice(0, DROPDOWN_MAX + 1) // ghost + 8 dropdown rows
+      if (top.length > 0) {
+        suggestions.value = top
+        selectedIdx.value = 0
         visible.value = true
       } else {
         visible.value = false
       }
     })()
+  }
+
+  /** Highlight the next suggestion in the dropdown. Wraps around. */
+  function selectNext() {
+    if (suggestions.value.length === 0) return
+    selectedIdx.value = (selectedIdx.value + 1) % suggestions.value.length
+  }
+
+  /** Highlight the previous suggestion in the dropdown. Wraps around. */
+  function selectPrev() {
+    if (suggestions.value.length === 0) return
+    selectedIdx.value =
+      (selectedIdx.value - 1 + suggestions.value.length) % suggestions.value.length
+  }
+
+  /** Mouse hover handler — called by `InlineAutocomplete` via emit. */
+  function setSelected(idx: number) {
+    if (idx < 0 || idx >= suggestions.value.length) return
+    selectedIdx.value = idx
   }
 
   function measureCell() {
@@ -206,19 +297,19 @@ export function useAutocomplete() {
   }
 
   function accept() {
-    if (!terminal || !currentSuggestion.value) return
-    const suggestion = currentSuggestion.value
+    if (!terminal) return
+    const suggestion = currentSelected()
     const prefix = typedPrefix.value
+    if (!suggestion || suggestion.length <= prefix.length) return
     const completion = suggestion.substring(prefix.length)
-    if (completion) {
-      terminal.sendData(completion)
-    }
+    terminal.sendData(completion)
     dismiss()
   }
 
   function dismiss() {
     visible.value = false
-    currentSuggestion.value = ''
+    suggestions.value = []
+    selectedIdx.value = 0
     lastPrefix = ''
   }
 
@@ -241,15 +332,20 @@ export function useAutocomplete() {
 
   return {
     visible,
-    currentSuggestion,
+    suggestions,
+    selectedIdx,
     typedPrefix,
     cursorPixelX,
     cursorPixelY,
     cursorFontSize,
     cursorFontFamily,
+    onBeforeSend: onBeforeSend,
     bind,
     unbind,
     accept,
     dismiss,
+    selectNext,
+    selectPrev,
+    setSelected,
   }
 }

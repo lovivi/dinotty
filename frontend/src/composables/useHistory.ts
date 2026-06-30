@@ -6,6 +6,9 @@ declare function tauriInvoke(cmd: string): Promise<unknown>
 export interface SuggestionItem {
   command: string
   frequency: number
+  /** Unix seconds. Used by the server to break frequency ties; the client
+   *  trusts the server's order so this field is informational. */
+  last_used_at?: number
 }
 
 const suggestions = ref<SuggestionItem[]>([])
