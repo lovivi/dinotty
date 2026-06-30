@@ -1,0 +1,69 @@
+name: Build macOS Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, dev, feat/windows-shell-profiles]
+    paths:
+      - 'src-tauri/**'
+      - 'frontend/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/build-macos.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos-desktop:
+    name: Build macOS Tauri bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Cache Rust toolchain
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Build Tauri bundle
+        working-directory: src-tauri
+        run: cargo-tauri build --target universal-apple-darwin
+
+      - name: Upload .app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinotty-macos-app
+          path: src-tauri/target/universal-apple-darwin/release/bundle/macos/Dinotty.app
+          if-no-files-found: warn
+
+      - name: Upload .dmg installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinotty-macos-dmg
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: warn
