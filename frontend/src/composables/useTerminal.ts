@@ -73,7 +73,15 @@ export class TerminalInstance {
   selStartCol = 0
   private _visibilityHandler: (() => void) | null = null
   private _dragDropCleanup: (() => void) | null = null
+  private _clipboardKeysCleanup: (() => void) | null = null
   private _initialResizeTimer: ReturnType<typeof setInterval> | null = null
+
+  /** True when the runtime looks like macOS. Used to decide whether
+   *  bare Cmd+C means copy (mac) or should be ignored (everywhere else). */
+  private _isMac(): boolean {
+    if (typeof navigator === 'undefined') return false
+    return /Mac|iPhone|iPad/.test(navigator.platform)
+  }
 
   onTitleChange: ((title: string) => void) | null = null
   onShellInfo: ((shell: string) => void) | null = null
@@ -197,6 +205,88 @@ export class TerminalInstance {
         }
         if (data === compositionData) return false
         return true
+      }
+    }
+
+    // Copy/paste shortcuts. We listen on the xterm helper textarea rather
+    // than document because that captures Ctrl+Shift+C / Cmd+C etc. before
+    // the browser routes them into the textarea's native copy/paste (which
+    // would copy *from the textarea* not from the xterm selection buffer).
+    //
+    // Bindings match what users expect from WSL / Windows Terminal /
+    // iTerm2 / gnome-terminal so muscle memory works:
+    //
+    //   Ctrl+Shift+C       copy    (WSL / Win / gnome)
+    //   Ctrl+Insert        copy    (legacy Linux / DOS)
+    //   Cmd+C              copy    (macOS)
+    //   Ctrl+Shift+V       paste   (WSL / Win / gnome)
+    //   Shift+Insert       paste   (legacy Linux / DOS)
+    //   Cmd+V              paste   (macOS)
+    //
+    // We deliberately do NOT bind plain Ctrl+C / Ctrl+V (they must remain
+    // SIGINT / literal "V" so the shell can use them).
+    if (textarea) {
+      const copySelectionToClipboard = async () => {
+        const sel = this.xterm?.getSelection()
+        if (!sel) return
+        try {
+          await navigator.clipboard.writeText(sel)
+        } catch {
+          // Clipboard write can be denied on insecure origins or by policy.
+          // Fall back to the legacy textarea select-and-copy trick.
+          textarea.value = sel
+          textarea.select()
+          try {
+            document.execCommand('copy')
+          } finally {
+            textarea.value = ''
+          }
+        }
+      }
+
+      const pasteFromClipboard = async () => {
+        let text: string
+        try {
+          text = await navigator.clipboard.readText()
+        } catch {
+          return
+        }
+        if (text) this.pasteText(text)
+      }
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        // Only react to platform-correct modifier combos. Both Ctrl and
+        // Cmd are accepted on macOS (Ctrl is sometimes Cmd-bound via
+        // key remapping) but the user's intent is clear from the shift
+        // flag.
+        const isCopy =
+          (e.ctrlKey || e.metaKey) &&
+          e.shiftKey &&
+          (e.key === 'C' || e.key === 'c')
+        const isCopyPlain = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'c' && this._isMac()
+        const isCopyInsert = (e.ctrlKey || e.metaKey) && e.key === 'Insert' && !e.shiftKey
+        const isPaste =
+          (e.ctrlKey || e.metaKey) &&
+          e.shiftKey &&
+          (e.key === 'V' || e.key === 'v')
+        const isPastePlain = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'v' && this._isMac()
+        const isPasteInsert = e.shiftKey && e.key === 'Insert'
+        if (isCopy || isCopyPlain || isCopyInsert) {
+          e.preventDefault()
+          e.stopPropagation()
+          void copySelectionToClipboard()
+          return
+        }
+        if (isPaste || isPastePlain || isPasteInsert) {
+          e.preventDefault()
+          e.stopPropagation()
+          void pasteFromClipboard()
+          return
+        }
+      }
+      textarea.addEventListener('keydown', onKeyDown, true)
+      this._clipboardKeysCleanup = () => {
+        textarea.removeEventListener('keydown', onKeyDown, true)
       }
     }
 
@@ -359,6 +449,7 @@ export class TerminalInstance {
     this._focusinCleanup?.()
     this._compositionCleanup?.()
     this._dragDropCleanup?.()
+    this._clipboardKeysCleanup?.()
     this._themeUnsub?.()
     this._textUnsub?.()
     if (this._transport) {
