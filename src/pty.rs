@@ -75,7 +75,24 @@ pub fn create_session_with_options(
         PathBuf::from,
     );
 
-    let effective_cwd = options.cwd.filter(|p| p.is_dir()).unwrap_or_else(|| home_path.clone());
+    let effective_cwd = match options.cwd.as_ref() {
+        Some(c) if c.is_dir() => c.clone(),
+        Some(c) => {
+            // Caller asked for a specific cwd but it isn't a directory
+            // (deleted, typo, or — on WSL — a 9P-mounted path the kernel
+            // can't stat yet). Log so the dev can diagnose without rerunning
+            // with strace. We fall back to $HOME rather than failing the PTY
+            // spawn, otherwise a transient filesystem hiccup would break the
+            // whole terminal session.
+            tracing::warn!(
+                "Requested cwd {:?} is not a directory; falling back to {:?}",
+                c,
+                home_path
+            );
+            home_path.clone()
+        }
+        None => home_path.clone(),
+    };
     cmd.cwd(&effective_cwd);
 
     // Shell-specific env setup still uses $HOME (for ZDOTDIR/PROMPT_COMMAND)

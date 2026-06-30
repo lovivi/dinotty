@@ -97,6 +97,11 @@ impl Session {
     /// After this, the PTY reader task's `reader.read()` will return Err/Ok(0),
     /// causing it to exit and drop its `Arc<Session>`, which triggers `Drop`.
     ///
+    /// On Windows when the shell is a WSL profile, the child is `wsl.exe` and
+    /// the bash inside the WSL VM receives SIGHUP once the PTY master closes
+    /// and exits cleanly. We log the profile id so any orphan reports can be
+    /// diagnosed via `wsl.exe -l -v` and `wsl.exe --terminate <distro>`.
+    ///
     /// # Panics
     /// May panic if the internal mutex is poisoned.
     pub fn kill_child(&self) {
@@ -104,7 +109,11 @@ impl Session {
         let pid = child.process_id();
         let _ = child.kill();
         let _ = child.wait();
-        info!("Session child killed: pid={:?}", pid);
+        if self.shell_profile_id.as_deref() == Some("wsl-default") {
+            info!("Session child killed (WSL profile): pid={:?} — bash inside WSL receives SIGHUP automatically when PTY closes", pid);
+        } else {
+            info!("Session child killed: pid={:?}", pid);
+        }
     }
 
     /// # Panics
