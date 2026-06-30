@@ -87,7 +87,7 @@ describe('useAutocomplete', () => {
     expect(ac.suggestions.value).not.toContain('cd /tmp/foo')
   })
 
-  it('accept on Tab sends the missing tail to the shell', async () => {
+  it('Tab is NOT intercepted — shell readline keeps filename completion', async () => {
     fetchSuggestionsMock.mockResolvedValue([
       { command: 'git status', frequency: 1 },
     ])
@@ -98,11 +98,11 @@ describe('useAutocomplete', () => {
     ac.onBeforeSend('x')
     await new Promise((r) => setTimeout(r, 80))
     expect(ac.suggestions.value[0]).toBe('git status')
-    // Tab → accept. prefix is `git sta` (trimmed from `git sta`).
+    // Tab must pass through to the shell — stealing it would conflict with
+    // readline's filename completion (cat /tmp/foo<Tab>).
     const blocked = ac.onBeforeSend('\t')
-    expect(blocked).toBe(true)
-    expect(sent).toEqual(['tus'])
-    expect(ac.visible.value).toBe(false)
+    expect(blocked).toBe(false)
+    expect(sent).toEqual([])
   })
 
   it('Esc dismisses the dropdown without accepting', async () => {
@@ -120,7 +120,7 @@ describe('useAutocomplete', () => {
     expect(ac.visible.value).toBe(false)
   })
 
-  it('Ctrl+F cycles to the next suggestion', async () => {
+  it('↓ cycles to the next suggestion (Warp/Fish convention)', async () => {
     fetchSuggestionsMock.mockResolvedValue([
       { command: 'git status', frequency: 99 },
       { command: 'git stash', frequency: 50 },
@@ -133,16 +133,16 @@ describe('useAutocomplete', () => {
     ac.onBeforeSend('x')
     await new Promise((r) => setTimeout(r, 80))
     expect(ac.selectedIdx.value).toBe(0)
-    expect(ac.onBeforeSend('\x06')).toBe(true)
+    expect(ac.onBeforeSend('\x1b[B')).toBe(true)
     expect(ac.selectedIdx.value).toBe(1)
-    expect(ac.onBeforeSend('\x06')).toBe(true)
+    expect(ac.onBeforeSend('\x1b[B')).toBe(true)
     expect(ac.selectedIdx.value).toBe(2)
     // Wraps around.
-    expect(ac.onBeforeSend('\x06')).toBe(true)
+    expect(ac.onBeforeSend('\x1b[B')).toBe(true)
     expect(ac.selectedIdx.value).toBe(0)
   })
 
-  it('Shift+Tab cycles to the previous suggestion (wraps)', async () => {
+  it('↑ cycles to the previous suggestion (wraps)', async () => {
     fetchSuggestionsMock.mockResolvedValue([
       { command: 'git status', frequency: 99 },
       { command: 'git stash', frequency: 50 },
@@ -154,9 +154,22 @@ describe('useAutocomplete', () => {
     ac.onBeforeSend('x')
     await new Promise((r) => setTimeout(r, 80))
     expect(ac.selectedIdx.value).toBe(0)
-    expect(ac.onBeforeSend('\x1b[Z')).toBe(true)
+    expect(ac.onBeforeSend('\x1b[A')).toBe(true)
     // Wraps from 0 back to last (length-1).
     expect(ac.selectedIdx.value).toBe(1)
+  })
+
+  it('↓ / ↑ pass through to the shell when no dropdown is visible', () => {
+    const { term, sent, setBuffer } = makeTerminal()
+    const ac = useAutocomplete()
+    ac.bind(term)
+    setBuffer('ls', 2)
+    // No suggestion fetched — visible is false.
+    expect(ac.visible.value).toBe(false)
+    expect(ac.onBeforeSend('\x1b[B')).toBe(false)
+    expect(ac.onBeforeSend('\x1b[A')).toBe(false)
+    expect(sent).toEqual([])
+    expect(ac.selectedIdx.value).toBe(0)
   })
 
   it('End key accepts the current selection (fish convention)', async () => {

@@ -3,18 +3,23 @@ import type { TerminalInstance } from './useTerminal'
 import { useHistory } from './useHistory'
 
 /**
- * Inline ghost-text autocomplete, modelled after fish / zsh-autosuggestions.
+ * Inline ghost-text autocomplete, modelled after fish / zsh-autosuggestions
+ * with arrow-key navigation (Warp-style).
  *
  *  - The server ranks history entries by frequency then recency (see
  *    `src/history.rs::query()`); the client trusts that ordering and keeps
  *    the top suggestions.
  *  - Suggestions 1..N are shown in a dropdown; suggestion 0 is also painted
  *    inline as ghost text after the cursor.
- *  - Accept: Tab, →, End, mouse click on a dropdown row.
- *  - Cycle:   Shift+Tab (prev), Ctrl+F (next). Cycling swaps the inline
- *    ghost to another suggestion without accepting it.
- *  - Dismiss: Esc, Ctrl+C, any keystroke that mutates the prefix so the
- *    next `updateFromBuffer()` produces a different prefix.
+ *  - Accept:        → / End (fish/zsh convention; we deliberately do NOT
+ *    bind Tab because shell readline uses Tab for filename completion
+ *    and stealing it confuses muscle memory).
+ *  - Cycle:         ↓ / ↑ (Warp/Fish convention; Ctrl+F / Shift+Tab were
+ *    tried but conflict with readline key bindings and editor habits).
+ *  - Dismiss:       Esc.
+ *  - Cycle keys are intercepted ONLY while the dropdown is visible; when
+ *    no suggestion is showing they fall through to the shell so users
+ *    can still use ↑/↓ for shell history navigation.
  *
  * Multi-pane safety: this composable is called inside each `TerminalPane`'s
  * `setup()`, so every pane gets its own instance. `bind()` is called once
@@ -80,26 +85,10 @@ export function useAutocomplete() {
       return false
     }
 
-    // Tab — accept current selection
-    if (data === '\t') {
-      if (visible.value && currentSelected()) {
-        accept()
-        return true
-      }
-      return false
-    }
-
-    // End (CSI F / SS3 F) — fish/zsh convention: jump to end and accept
-    if (data === '\x1b[F' || data === '\x1bOF') {
-      if (visible.value && currentSelected()) {
-        accept()
-        return true
-      }
-      return false
-    }
-
-    // Ctrl+F — cycle to next suggestion without accepting
-    if (data === '\x06') {
+    // ↓ arrow (CSI B / SS3 B) — cycle to next suggestion. Only intercepted
+    // when the dropdown is visible so the keystroke still reaches the shell
+    // (history navigation) when no suggestion is up.
+    if (data === '\x1b[B' || data === '\x1bOB') {
       if (visible.value && suggestions.value.length > 1) {
         selectNext()
         return true
@@ -107,10 +96,21 @@ export function useAutocomplete() {
       return false
     }
 
-    // Shift+Tab — cycle to previous suggestion without accepting
-    if (data === '\x1b[Z') {
+    // ↑ arrow (CSI A / SS3 A) — cycle to previous suggestion. Same gating
+    // as ↓ above.
+    if (data === '\x1b[A' || data === '\x1bOA') {
       if (visible.value && suggestions.value.length > 1) {
         selectPrev()
+        return true
+      }
+      return false
+    }
+
+    // End (CSI F / SS3 F) — fish/zsh convention: jump to end of line and
+    // accept the current selection.
+    if (data === '\x1b[F' || data === '\x1bOF') {
+      if (visible.value && currentSelected()) {
+        accept()
         return true
       }
       return false

@@ -385,7 +385,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'project.error.deleteFailed': 'Failed to delete project',
     'project.error.moveFailed': 'Failed to move tab to project',
     'project.error.syncPartial': 'Some tab metadata failed to sync; will reconcile on next reload',
-    'autocomplete.hint': 'Tab/→ accept · Ctrl+F cycle · Esc dismiss',
+    'autocomplete.hint': '→/End accept · ↓/↑ cycle · Esc dismiss',
   },
   zh: {
     'app.settings': '设置',
@@ -761,7 +761,7 @@ const messages: Record<Locale, Record<string, string>> = {
     'project.error.deleteFailed': '删除项目失败',
     'project.error.moveFailed': '移动标签页到项目失败',
     'project.error.syncPartial': '部分标签页元数据同步失败，下次重载时会自动修复',
-    'autocomplete.hint': 'Tab/→ 接受 · Ctrl+F 切换 · Esc 取消',
+    'autocomplete.hint': '→/End 接受 · ↓/↑ 切换 · Esc 取消',
   },
 }
 
