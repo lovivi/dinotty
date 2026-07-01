@@ -31,12 +31,14 @@ jobs:
           java-version: '17'
 
       # Install Android SDK command-line tools + required packages.
-      # cmdline-tools-version 11076708 = command-line tools 11.0 (current as
-      # of late 2024 / 2025; still the recommended pin for build-tools 34).
+      # The ubuntu-latest runner already pre-installs cmdline-tools 12.0
+      # at /usr/local/lib/android/sdk/cmdline-tools/latest. Don't pin a
+      # specific cmdline-tools-version: the pinned 11.0 is older than
+      # 12.0 and doesn't recognise `build-tools;34.0.0` as a valid
+      # package, so sdkmanager fails with "Failed to find package".
       - name: Install Android SDK
         uses: android-actions/setup-android@v3
         with:
-          cmdline-tools-version: '11076708'
           packages: |
             platform-tools
             build-tools;34.0.0
