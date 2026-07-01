@@ -89,8 +89,11 @@ jobs:
             ]
           }
           EOF
-          # Generate Android project in ./android-app from the manifest
-          bubblewrap init --manifest=twa-manifest.json \
+          # Generate Android project in ./android-app from the manifest.
+          # Bubblewrap's `init` is interactive; pipe `n\n` to skip the
+          # JDK-install prompt. The non-interactive env var is not
+          # honored in current bubblewrap releases.
+          yes n | bubblewrap init --manifest=twa-manifest.json \
             --directory=android-app 2>&1 | tee bubblewrap.log || {
               echo "bubblewrap init failed:" >&2
               cat bubblewrap.log >&2
