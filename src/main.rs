@@ -20,7 +20,22 @@ use std::net::SocketAddr;
 
 use std::sync::Arc;
 use std::sync::atomic;
+use std::sync::Mutex;
 use std::time::Duration;
+use std::collections::HashMap;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
+type StreamMap = Arc<
+    Mutex<
+        HashMap<
+            String,
+            tokio::sync::mpsc::UnboundedSender<
+                tokio_tungstenite::tungstenite::Message,
+            >,
+        >,
+    >,
+>;
+
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing::{info, warn};
@@ -297,6 +312,7 @@ async fn run_relay_outbound(
     desktop_id: String,
     manager: Arc<SessionManager>,
     shutdown: Arc<atomic::AtomicBool>,
+    local_port: u16,
 ) {
     use futures_util::{SinkExt, StreamExt};
     use std::time::Duration;
@@ -391,18 +407,148 @@ async fn run_relay_outbound(
         let shutdown_for_screen = shutdown.clone();
         let desktop_id_for_log = desktop_id.clone();
 
-        // Reader task
+        // Channel for reader → response forwarder (http_resp, ws_data,
+        // ws_close frames).
+        let (res_tx, mut res_rx) =
+            tokio::sync::mpsc::unbounded_channel::<tokio_tungstenite::tungstenite::Message>();
+
+        // Shared map: stream_id → sender for local WS bridge tasks.
+        let streams: StreamMap =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        // Reader task — parses framed JSON messages from the relay.
+        //
+        //   "input"     → write keystrokes to the active PTY          (existing)
+        //   "http_req"  → make a local HTTP request, send back resp
+        //   "ws_open"   → open local WS connection, bridge frames
+        //   "ws_data"   → forward data to the local WS for stream_id
+        //   "ws_close"  → close the local WS for stream_id
+        let reader_res_tx = res_tx.clone();
+        let reader_streams = streams.clone();
         let reader = tokio::spawn(async move {
+            use std::io::Write;
             while let Some(msg) = ws_rx.next().await {
                 match msg {
                     Ok(m) => {
-                        // v0: incoming frames are not used. We only keep the
-                        // connection open. Log them in case v1 wiring is
-                        // useful for debugging.
-                        if matches!(m, tungstenite::Message::Close(_)) {
+                        let payload = match &m {
+                            tokio_tungstenite::tungstenite::Message::Text(text) => {
+                                Some(text.as_str())
+                            }
+                            tokio_tungstenite::tungstenite::Message::Binary(bytes) => {
+                                std::str::from_utf8(bytes).ok()
+                            }
+                            _ => None,
+                        };
+                        if let Some(raw) = payload {
+                            if let Ok(val) =
+                                serde_json::from_str::<serde_json::Value>(raw)
+                            {
+                                match val.get("type").and_then(|v| v.as_str()) {
+                                    Some("input") => {
+                                        if let Some(data) =
+                                            val.get("data").and_then(|v| v.as_str())
+                                        {
+                                            if let Ok(snap) = manager_for_reader
+                                                .active_pane_snapshot()
+                                            {
+                                                let pane_id = snap.pane_id;
+                                                if let Some(entry) =
+                                                    manager_for_reader.sessions.get(&pane_id)
+                                                {
+                                                    if let Ok(mut w) = entry.writer.lock()
+                                                    {
+                                                        let _ = w.write_all(
+                                                            data.as_bytes(),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Some("http_req") => {
+                                        let tx = reader_res_tx.clone();
+                                        let req_val = val.clone();
+                                        tokio::spawn(async move {
+                                            http_req_proxy(req_val, tx, local_port)
+                                                .await;
+                                        });
+                                    }
+                                    Some("ws_open") => {
+                                        let sid = val
+                                            .get("stream_id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let path = val
+                                            .get("path")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("/ws")
+                                            .to_string();
+                                        let tx = reader_res_tx.clone();
+                                        let strs = reader_streams.clone();
+                                        tokio::spawn(async move {
+                                            ws_bridge_proxy(
+                                                sid, path, tx, strs, local_port,
+                                            )
+                                            .await;
+                                        });
+                                    }
+                                    Some("ws_data") => {
+                                        let sid = val
+                                            .get("stream_id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let data_b64 = val
+                                            .get("data")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        let binary = val
+                                            .get("binary")
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false);
+                                        let bytes = BASE64
+                                            .decode(data_b64)
+                                            .unwrap_or_default();
+                                        let map = reader_streams.lock().unwrap();
+                                        if let Some(tx) = map.get(sid) {
+                                            let msg = if binary {
+                                                tokio_tungstenite::tungstenite::Message::Binary(
+                                                    bytes,
+                                                )
+                                            } else {
+                                                tokio_tungstenite::tungstenite::Message::Text(
+                                                    String::from_utf8_lossy(&bytes)
+                                                        .to_string(),
+                                                )
+                                            };
+                                            let _ = tx.send(msg);
+                                        }
+                                    }
+                                    Some("ws_close") => {
+                                        let sid = val
+                                            .get("stream_id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let mut map = reader_streams.lock().unwrap();
+                                        if let Some(tx) = map.remove(&sid) {
+                                            let _ = tx.send(
+                                                tokio_tungstenite::tungstenite::Message::Close(
+                                                    None,
+                                                ),
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        if matches!(
+                            m,
+                            tokio_tungstenite::tungstenite::Message::Close(_)
+                        ) {
                             break;
                         }
-                        let _ = &manager_for_reader; // keep compiler happy
                         let _ = &desktop_id_for_reader;
                     }
                     Err(_) => break,
@@ -411,24 +557,39 @@ async fn run_relay_outbound(
             info!(desktop_id = %desktop_id_for_log, "relay reader ended");
         });
 
-        // Screen-ticker task
+        // Screen-ticker task + response forwarder.
+        //
+        // Every 200 ms a screen snapshot is sent.  Also reads from
+        // `res_rx` and forwards the frames through `ws_tx` — this lets
+        // http_req / ws_open handlers send their responses without
+        // needing direct access to `ws_tx`.
         let screen = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(200));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
-                interval.tick().await;
-                if shutdown_for_screen.load(atomic::Ordering::Relaxed) {
-                    break;
-                }
-                let payload = snapshot_active_pane(&manager_for_screen);
-                if let Some(payload) = payload {
-                    let frame = serde_json::to_string(&payload).unwrap_or_default();
-                    if ws_tx
-                        .send(tungstenite::Message::Text(frame))
-                        .await
-                        .is_err()
-                    {
-                        break;
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if shutdown_for_screen.load(atomic::Ordering::Relaxed) {
+                            break;
+                        }
+                        let payload = snapshot_active_pane(&manager_for_screen);
+                        if let Some(payload) = payload {
+                            let frame = serde_json::to_string(&payload).unwrap_or_default();
+                            if ws_tx
+                                .send(
+                                    tokio_tungstenite::tungstenite::Message::Text(frame),
+                                )
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    Some(msg) = res_rx.recv() => {
+                        if ws_tx.send(msg).await.is_err() {
+                            break;
+                        }
                     }
                 }
             }
@@ -452,6 +613,195 @@ async fn run_relay_outbound(
     }
 
     info!("outbound relay client exiting");
+}
+
+// ── Framed-message helpers ──────────────────────────────────────────
+
+/// Handle an `http_req` frame: make a local HTTP request and send back
+/// `http_resp` through the response channel.
+async fn http_req_proxy(
+    val: serde_json::Value,
+    res_tx: tokio::sync::mpsc::UnboundedSender<tokio_tungstenite::tungstenite::Message>,
+    local_port: u16,
+) {
+    let req_id = val
+        .get("req_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let method = val.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
+    let path = val.get("path").and_then(|v| v.as_str()).unwrap_or("/");
+    let body_b64 = val.get("body").and_then(|v| v.as_str()).unwrap_or("");
+    let body_bytes = BASE64.decode(body_b64).unwrap_or_default();
+
+    let url = format!("http://127.0.0.1:{}{}", local_port, path);
+
+    let client = reqwest::Client::new();
+    let mut req_builder = match method {
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        "PUT" => client.put(&url),
+        "DELETE" => client.delete(&url),
+        "PATCH" => client.patch(&url),
+        "HEAD" => client.head(&url),
+        _ => client.get(&url),
+    };
+
+    // Forward headers.
+    if let Some(headers_val) = val.get("headers").and_then(|v| v.as_object()) {
+        for (k, v) in headers_val {
+            if let Some(vs) = v.as_str() {
+                if let (Ok(hk), Ok(hv)) = (
+                    reqwest::header::HeaderName::from_bytes(k.as_bytes()),
+                    reqwest::header::HeaderValue::from_str(vs),
+                ) {
+                    req_builder = req_builder.header(hk, hv);
+                }
+            }
+        }
+    }
+
+    // Body for write-methods.
+    if !body_bytes.is_empty() && method != "GET" && method != "HEAD" {
+        req_builder = req_builder.body(body_bytes);
+    }
+
+    match req_builder.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let resp_headers = resp.headers().clone();
+            let resp_body = resp.bytes().await.unwrap_or_default();
+
+            let mut headers_json = serde_json::Map::new();
+            for (name, value) in resp_headers.iter() {
+                if let Ok(v) = value.to_str() {
+                    headers_json
+                        .insert(name.as_str().to_string(), serde_json::Value::String(v.to_string()));
+                }
+            }
+
+            let frame = serde_json::json!({
+                "type": "http_resp",
+                "req_id": req_id,
+                "status": status,
+                "headers": headers_json,
+                "body": BASE64.encode(resp_body),
+            });
+            let json = serde_json::to_string(&frame).unwrap_or_default();
+            let _ = res_tx.send(tokio_tungstenite::tungstenite::Message::Text(json));
+        }
+        Err(e) => {
+            let err_frame = serde_json::json!({
+                "type": "http_resp",
+                "req_id": req_id,
+                "status": 502,
+                "headers": {},
+                "body": BASE64.encode(format!("proxy error: {e}")),
+            });
+            let json = serde_json::to_string(&err_frame).unwrap_or_default();
+            let _ = res_tx.send(tokio_tungstenite::tungstenite::Message::Text(json));
+        }
+    }
+}
+
+/// Handle a `ws_open` frame: connect to the local WS endpoint at
+/// `ws://127.0.0.1:{local_port}{path}` and bridge frames bidirectionally
+/// through the framed tunnel.
+async fn ws_bridge_proxy(
+    stream_id: String,
+    path: String,
+    res_tx: tokio::sync::mpsc::UnboundedSender<tokio_tungstenite::tungstenite::Message>,
+    streams: StreamMap,
+    local_port: u16,
+) {
+    use futures_util::{SinkExt, StreamExt};
+
+    let url = format!("ws://127.0.0.1:{}{}", local_port, path);
+
+    let (local_ws, _) = match tokio_tungstenite::connect_async(&url).await {
+        Ok(ws) => ws,
+        Err(e) => {
+            tracing::warn!(%stream_id, %url, error = %e, "ws_open: local connect failed");
+            return;
+        }
+    };
+
+    let (mut local_tx, mut local_rx) = local_ws.split();
+
+    // Channel for receiving data from outbound WS → local WS.
+    let (stream_tx, mut stream_rx) =
+        tokio::sync::mpsc::unbounded_channel::<tokio_tungstenite::tungstenite::Message>();
+
+    // Register sender so the reader can forward ws_data / ws_close.
+    streams.lock().unwrap().insert(stream_id.clone(), stream_tx);
+
+    // Task 1: local WS → outbound WS (via res_tx as ws_data / ws_close).
+    let sid = stream_id.clone();
+    let res_tx_clone = res_tx.clone();
+    let to_outbound = tokio::spawn(async move {
+        while let Some(msg) = local_rx.next().await {
+            let msg = match msg {
+                Ok(m) => m,
+                Err(_) => break,
+            };
+            let frame = match &msg {
+                tokio_tungstenite::tungstenite::Message::Text(t) => serde_json::json!({
+                    "type": "ws_data",
+                    "stream_id": &sid,
+                    "data": BASE64.encode(t.as_bytes()),
+                    "binary": false,
+                }),
+                tokio_tungstenite::tungstenite::Message::Binary(b) => serde_json::json!({
+                    "type": "ws_data",
+                    "stream_id": &sid,
+                    "data": BASE64.encode(b),
+                    "binary": true,
+                }),
+                tokio_tungstenite::tungstenite::Message::Close(_) => serde_json::json!({
+                    "type": "ws_close",
+                    "stream_id": &sid,
+                }),
+                _ => continue,
+            };
+            let json = serde_json::to_string(&frame).unwrap_or_default();
+            if res_tx_clone
+                .send(tokio_tungstenite::tungstenite::Message::Text(json))
+                .is_err()
+            {
+                break;
+            }
+            if matches!(msg, tokio_tungstenite::tungstenite::Message::Close(_)) {
+                break;
+            }
+        }
+        // On unexpected disconnect, send ws_close.
+        let close_frame = serde_json::json!({
+            "type": "ws_close",
+            "stream_id": &sid,
+        });
+        if let Ok(json) = serde_json::to_string(&close_frame) {
+            let _ = res_tx_clone
+                .send(tokio_tungstenite::tungstenite::Message::Text(json));
+        }
+    });
+
+    // Task 2: outbound WS → local WS (via stream_rx).
+    let to_local = tokio::spawn(async move {
+        while let Some(msg) = stream_rx.recv().await {
+            if local_tx.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Wait for either direction to close.
+    tokio::select! {
+        _ = to_outbound => {},
+        _ = to_local => {},
+    }
+
+    // Cleanup: unregister the stream.
+    streams.lock().unwrap().remove(&stream_id);
 }
 
 fn extract_host(url: &str) -> String {
@@ -712,7 +1062,7 @@ async fn main() {
                 let _ = std::fs::write(&path, &desktop_id);
             }
         }
-        run_relay_outbound(relay_url, relay_password, desktop_id, manager, shutdown).await;
+        run_relay_outbound(relay_url, relay_password, desktop_id, manager, shutdown, args.port).await;
         return;
     }
 

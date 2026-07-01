@@ -17,6 +17,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod proxy;
+
 use axum::{
     body::Body,
     extract::{
@@ -120,7 +122,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/relay/desktop/register", post(register_desktop))
         .route("/relay/desktop/ws/:desktop_id", get(desktop_ws_upgrade))
         .route("/relay/mobile/ws/:desktop_id", get(mobile_ws_upgrade))
-        .fallback(static_handler)
+        // WS proxy catches /ws and /ws/* so that WebSocket upgrades for
+        // terminal sessions, sync, monitor, history, etc. are forwarded
+        // through the outbound tunnel.
+        .route("/ws", get(proxy::ws_proxy_handler))
+        .route("/ws/*path", get(proxy::ws_proxy_handler))
+        // Everything else: static files or HTTP proxy.
+        .fallback(proxy::proxy_fallback)
         .with_state(state);
 
     info!("dinotty-relay listening on {}", listen);
@@ -436,6 +444,11 @@ fn check_password(headers: &axum::http::HeaderMap, expected: &str) -> bool {
 
 /// Fallback handler: serve the embedded frontend dist. SPA fallback
 /// to `index.html` for unknown paths so the frontend router can take over.
+///
+/// Note: this is no longer wired into the router — `proxy::proxy_fallback`
+/// handles both static files and HTTP proxying. Kept for reference /
+/// test use.
+#[allow(dead_code)]
 async fn static_handler(req: Request<Body>) -> AxumResponse {
     let path = req.uri().path();
     let path = path.trim_start_matches('/');

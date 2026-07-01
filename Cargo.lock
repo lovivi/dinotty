@@ -1146,6 +1146,7 @@ version = "0.12.1"
 dependencies = [
  "axum 0.7.9",
  "axum-extra",
+ "base64 0.22.1",
  "bytes",
  "dashmap",
  "dirs 5.0.1",

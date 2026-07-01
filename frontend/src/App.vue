@@ -240,6 +240,7 @@ import {
   getApiBase,
   checkTokenConfigured,
   setAuthToken,
+  setDesktopId,
 } from './composables/apiBase'
 import RemoteScreen from './components/remote/RemoteScreen.vue'
 import { isTauri, tauriInvoke } from './composables/useTransport'
@@ -316,6 +317,7 @@ function parseRelayMode() {
   if (fragment) {
     setAuthToken(fragment)
   }
+  setDesktopId(desktopId)
   remoteMode.value = { desktopId, token: fragment }
 }
 

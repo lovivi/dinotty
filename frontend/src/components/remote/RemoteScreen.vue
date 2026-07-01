@@ -14,11 +14,27 @@
       <div class="remote-screen-tag">read-only · v0</div>
     </header>
     <pre ref="termEl" class="remote-screen-term">{{ screen }}</pre>
+    <form class="remote-screen-input" @submit.prevent="sendInput">
+      <input
+        ref="inputEl"
+        v-model="inputText"
+        class="input-field"
+        type="text"
+        placeholder="Type a command…"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        @keyup.esc="inputText = ''; (inputEl as any)?.blur()"
+      />
+      <button type="submit" class="input-btn" :disabled="!inputText.trim()">
+        Send
+      </button>
+    </form>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, nextTick } from 'vue'
 
 const props = defineProps<{
   relayUrl: string
@@ -32,6 +48,8 @@ const cols = ref(0)
 const rows = ref(0)
 const screen = ref('')
 const termEl = ref<HTMLPreElement | null>(null)
+const inputEl = ref<HTMLInputElement | null>(null)
+const inputText = ref('')
 
 // FPS counter
 let frameCount = 0
@@ -109,6 +127,15 @@ function connect() {
 onMounted(() => {
   connect()
 })
+
+function sendInput() {
+  const text = inputText.value.trim()
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return
+  ws.send(JSON.stringify({ type: 'input', data: text + '\r' }))
+  inputText.value = ''
+  // Focus back on the input after sending
+  nextTick(() => inputEl.value?.focus())
+}
 
 onBeforeUnmount(() => {
   alive = false

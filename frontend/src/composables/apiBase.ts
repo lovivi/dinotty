@@ -1,6 +1,7 @@
 import { isTauri, tauriInvoke } from './useTransport'
 
 const STORAGE_KEY = 'dinotty_auth_token'
+const DESKTOP_ID_KEY = 'dinotty_desktop_id'
 
 let cached = ''
 let inflight: Promise<string> | null = null
@@ -28,6 +29,22 @@ export function setAuthToken(token: string): void {
 
 export function clearAuthToken(): void {
   localStorage.removeItem(STORAGE_KEY)
+}
+
+export function getDesktopId(): string {
+  return localStorage.getItem(DESKTOP_ID_KEY) || ''
+}
+
+export function setDesktopId(id: string): void {
+  if (id) {
+    localStorage.setItem(DESKTOP_ID_KEY, id)
+  } else {
+    localStorage.removeItem(DESKTOP_ID_KEY)
+  }
+}
+
+export function clearDesktopId(): void {
+  localStorage.removeItem(DESKTOP_ID_KEY)
 }
 
 export function hasAuthToken(): boolean {
@@ -127,7 +144,15 @@ export async function authFetch(url: string, init?: RequestInit): Promise<Respon
 
 export function wsUrlWithToken(url: string): string {
   const token = getAuthToken()
-  if (!token) return url
-  const sep = url.includes('?') ? '&' : '?'
-  return `${url}${sep}token=${encodeURIComponent(token)}`
+  const desktopId = getDesktopId()
+  let result = url
+  if (token) {
+    const sep = result.includes('?') ? '&' : '?'
+    result = `${result}${sep}token=${encodeURIComponent(token)}`
+  }
+  if (desktopId) {
+    const sep = result.includes('?') ? '&' : '?'
+    result = `${result}${sep}desktop_id=${encodeURIComponent(desktopId)}`
+  }
+  return result
 }
