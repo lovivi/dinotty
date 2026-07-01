@@ -31,17 +31,17 @@ jobs:
           java-version: '17'
 
       # Install Android SDK command-line tools + required packages.
-      # The ubuntu-latest runner pre-installs cmdline-tools 16.0 (the
-      # newest at this runner image). build-tools 35+ is current;
-      # build-tools 34.0.0 was deprecated in cmdline-tools 14+, so the
-      # older "34.0.0" string now reports "Failed to find package".
+      # The ubuntu-latest runner pre-installs cmdline-tools 16.0. Note
+      # the new "platform;android-XX" (no s) package name format used
+      # by cmdline-tools 16+; the older "platforms;android-XX" (with s)
+      # reports "Failed to find package" on this version.
       - name: Install Android SDK
         uses: android-actions/setup-android@v3
         with:
           packages: |
             platform-tools
             build-tools;35.0.0
-            platforms;android-35
+            platform;android-35
           # Explicit install dir keeps the cache key stable across runners.
           android-installation-path: ${{ runner.workspace }}/android-sdk
 
