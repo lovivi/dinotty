@@ -109,7 +109,7 @@ if [[ -z "$JAVA_FILES" ]]; then
 fi
 # shellcheck disable=SC2086
 "$JAVAC" -source 17 -target 17 \
-    -bootclasspath "$PLATFORM_JAR" \
+    -classpath "$PLATFORM_JAR" \
     -d "$OUTDIR/classes" \
     $JAVA_FILES
 
