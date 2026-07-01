@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # server-install.sh — install + start the Dinotty relay on a fresh VPS.
 #
-# Usage:  curl -sSL https://raw.githubusercontent.com/<owner>/<repo>/feat/apk-relay/deploy/relay/server-install.sh | sudo bash -s -- <password>
+# Usage:  curl -sSL https://raw.githubusercontent.com/lovivi/dinotty/feat/windows-shell-profiles/deploy/relay/server-install.sh | sudo bash -s -- <password>
 #   or:   wget -qO- ... | sudo bash -s -- <password>
 #
 # What it does:
@@ -143,7 +143,7 @@ cat <<EOF
 
   Copy this line. On the desktop where Dinotty runs:
 
-    curl -sSL https://raw.githubusercontent.com/${REPO}/feat/apk-relay/deploy/relay/local-connect.sh | bash -s -- "ws://${PUBLIC_IP}:9000" "\$(cat ${ENV_FILE} | grep -oP 'RELAY_PASSWORD=\\K.*')"
+    curl -sSL https://raw.githubusercontent.com/${REPO}/feat/windows-shell-profiles/deploy/relay/local-connect.sh | bash -s -- "ws://${PUBLIC_IP}:9000" "\$(cat ${ENV_FILE} | grep -oP 'RELAY_PASSWORD=\\K.*')"
 
   Or just open the Dinotty APK on your phone, enter:
     URL:      https://${PUBLIC_IP}:9000
