@@ -61,27 +61,20 @@ jobs:
             cargo build --release
           fi
 
-      # Use Bubblewrap's CLI to wrap the PWA into a TWA. Bubblewrap
-      # generates an Android project that loads the start_url in a
-      # Trusted WebView, signed with a debug key for distribution as
-      # an unsigned-but-installable APK.
+      # Use Bubblewrap (Google's TWA builder CLI) to wrap the PWA into
+      # a TWA. Bubblewrap accepts a manifest URL or local file and
+      # produces an Android project that loads the start_url in a
+      # Trusted WebView, signed with a debug key for distribution.
       - name: Install bubblewrap
         run: npm install -g @bubblewrap/cli
 
       - name: Generate TWA project + build APK
         run: |
-          mkdir -p twa
-          cd twa
-          # Bubblewrap expects a manifest.json. The frontend's PWA
-          # already ships one. We point Bubblewrap at it, override the
-          # start_url to `<relay>/?desktop_id=...` placeholder (the
-          # real value is set by the user when they run
-          # `local-connect.sh` on the desktop), and build an APK.
-          #
-          # `bubblewrap init` is interactive; we drive it via
-          # environment vars and manifest patching. The simpler
-          # alternative is `pwabuilder` (npm package) which is also
-          # what PWABuilder.com runs server-side.
+          # Bubblewrap's `init` is interactive. Drive it via env vars
+          # and a pre-written twa-manifest.json. We pass the manifest
+          # file path as the positional arg so it skips the
+          # "enter your PWA URL" prompt.
+          export BUBBLEWRAP_INIT_NONINTERACTIVE=1
           cat > twa-manifest.json <<'EOF'
           {
             "name": "Dinotty",
@@ -96,23 +89,29 @@ jobs:
             ]
           }
           EOF
-          # Use @pwabuilder/cli for a non-interactive TWA build. It
-          # accepts a URL or local manifest.
-          npx --yes @pwabuilder/cli build \
-            --platform android \
-            --output ./apk \
-            ./twa-manifest.json 2>&1 | tee pwabuilder.log || {
-              echo "PWABuilder failed; falling back to manual android build" >&2
-              cat pwabuilder.log >&2
+          # Generate Android project in ./android-app from the manifest
+          bubblewrap init --manifest=twa-manifest.json \
+            --directory=android-app 2>&1 | tee bubblewrap.log || {
+              echo "bubblewrap init failed:" >&2
+              cat bubblewrap.log >&2
               exit 1
             }
+          # Build the APK. Bubblewrap's `build` runs gradle assembleDebug.
+          cd android-app
+          ./gradlew assembleDebug 2>&1 | tee -a ../bubblewrap.log || {
+              echo "gradle build failed:" >&2
+              cat ../bubblewrap.log >&2
+              exit 1
+            }
+          # Find the produced APK
+          find app/build/outputs/apk -name '*.apk' -type f | head -1
 
       - name: Locate APK
         id: locate
         run: |
-          APK_PATH=$(find twa/apk -name '*.apk' -type f | head -1)
+          APK_PATH=$(find android-app/app/build/outputs/apk -name '*.apk' -type f | head -1)
           if [ -z "$APK_PATH" ]; then
-            echo "::error::no .apk found under twa/apk/"
+            echo "::error::no .apk found under android-app/app/build/outputs/apk/"
             exit 1
           fi
           echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
