@@ -252,16 +252,6 @@ public class MainActivity extends Activity {
         }
 
         @Override
-        public void onReceivedHttpError(WebView view, WebResourceRequest request,
-                                        WebResourceResponse errorResponse) {
-            if (request != null && request.isForMainFrame()
-                    && errorResponse != null
-                    && errorResponse.getStatusCode() >= 500) {
-                showErrorPage();
-            }
-        }
-
-        @Override
         public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
             // The renderer crashed (often OOM). Tear down and surface the
             // error page so the user can retry cleanly.
