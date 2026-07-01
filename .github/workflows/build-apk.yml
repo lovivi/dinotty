@@ -110,14 +110,18 @@ jobs:
       - name: Locate APK
         id: locate
         run: |
-          find twa/apk -name '*.apk' -type f | head -1 > apk_path
-          echo "apk=$(cat apk_path)" >> "$GITHUB_OUTPUT"
+          APK_PATH=$(find twa/apk -name '*.apk' -type f | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "::error::no .apk found under twa/apk/"
+            exit 1
+          fi
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: dinotty-mobile-apk
-          path: ${{ steps.locate.outputs.apk }}
+          path: ${{ steps.locate.outputs.apk_path }}
           if-no-files-found: error
 
       - name: Upload relay binary (if built)
