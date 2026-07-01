@@ -13,3 +13,4 @@ src-tauri/gen/schemas/
 relay/target/
 **/target/
 dist-new/
+deploy/twa/debug.keystore

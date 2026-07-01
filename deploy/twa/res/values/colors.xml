@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dinotty brand palette (Material 3 inspired, dark-first) -->
+    <color name="primary">#7C3AED</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#4C1D95</color>
+    <color name="on_primary_container">#EDE9FE</color>
+
+    <color name="secondary">#38BDF8</color>
+    <color name="on_secondary">#0F172A</color>
+
+    <color name="surface">#0F172A</color>
+    <color name="on_surface">#E2E8F0</color>
+    <color name="surface_variant">#1E293B</color>
+    <color name="surface_container">#1E293B</color>
+    <color name="surface_container_high">#334155</color>
+    <color name="on_surface_variant">#94A3B8</color>
+    <color name="outline">#475569</color>
+
+    <color name="background">#0F172A</color>
+    <color name="on_background">#E2E8F0</color>
+
+    <color name="error">#EF4444</color>
+    <color name="on_error">#FFFFFF</color>
+
+    <color name="success">#10B981</color>
+    <color name="warning">#F59E0B</color>
+</resources>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App identity -->
+    <string name="app_name">Dinotty</string>
+
+    <!-- Launcher / loading screen -->
+    <string name="launcher_loading">Loading…</string>
+    <string name="launcher_subtitle">Connecting to your terminal</string>
+
+    <!-- Connection states -->
+    <string name="connection_failed_title">Connection failed</string>
+    <string name="connection_failed_message">Connection failed, retry?</string>
+    <string name="connection_lost">Connection lost. Reconnecting…</string>
+    <string name="connection_offline">You are offline</string>
+
+    <!-- Common actions -->
+    <string name="action_retry">Retry</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_settings">Settings</string>
+</resources>
