@@ -19,11 +19,8 @@ jobs:
     runs-on: ubuntu-latest
 
     # android-actions/setup-android exports ANDROID_HOME / ANDROID_SDK_ROOT
-    # into the runner environment for subsequent steps.
-    env:
-      ANDROID_HOME: ${{ env.ANDROID_HOME }}
-      ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
-
+    # into the runner environment for subsequent steps, so we don't need
+    # to set them here.
     steps:
       - uses: actions/checkout@v4
 
