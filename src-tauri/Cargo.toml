@@ -26,6 +26,12 @@ base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart"] }
 rfd = "0.15"
 
+# These are the Android-only deps. They live in the workspace's
+# `relay/` crate; the desktop Tauri binary does not import them. When
+# the Android Tauri build runs, the same Cargo workspace is reused,
+# and `--no-default-features --features mobile` is passed to opt out
+# of the desktop-only deps below.
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

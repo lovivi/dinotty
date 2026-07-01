@@ -1,5 +1,6 @@
 [workspace]
 members = ["src-tauri"]
+exclude = ["relay"]
 
 [package]
 name = "dinotty-server"
@@ -29,7 +30,10 @@ notify = "6"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 dirs = "5"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip", "brotli", "blocking", "json"] }
-tokio-tungstenite = "0.24"
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "url", "handshake"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["logging", "std", "tls12", "ring"] }
+webpki-roots = "0.26"
 tokio-util = { version = "0.7", features = ["io"] }
 bytes = "1"
 regex = "1.12.3"
@@ -73,5 +77,10 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 unwrap_used = "warn"
 expect_used = "warn"
+uninlined_format_args = "allow"
+doc_markdown = "allow"
+needless_pass_by_value = "allow"
+redundant_clone = "allow"
+duration_suboptimal_units = "allow"
 
 [dev-dependencies]

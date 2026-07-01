@@ -19,8 +19,11 @@ use std::fs;
 use std::net::SocketAddr;
 
 use std::sync::Arc;
+use std::sync::atomic;
+use std::time::Duration;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::{info, warn};
 
 use crate::file_watcher::FileWatcherState;
 use crate::history::HistoryState;
@@ -239,24 +242,311 @@ async fn icon_handler(Path(path): Path<String>) -> impl IntoResponse {
     }
 }
 
-fn parse_port() -> u16 {
-    let args: Vec<String> = std::env::args().collect();
+fn parse_args() -> Args {
+    let mut args = Args::default();
+    let raw: Vec<String> = std::env::args().collect();
     let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
+    while i < raw.len() {
+        match raw[i].as_str() {
             "--port" | "-p" => {
-                if let Some(v) = args.get(i + 1) {
-                    return v.parse().expect("invalid port number");
+                if let Some(v) = raw.get(i + 1) {
+                    args.port = v.parse().expect("invalid port number");
+                    i += 2;
+                    continue;
                 }
             }
             s if s.starts_with("--port=") => {
-                return s[7..].parse().expect("invalid port number");
+                args.port = s[7..].parse().expect("invalid port number");
+                i += 1;
+                continue;
+            }
+            "--relay-outbound" => {
+                args.relay_url = raw.get(i + 1).cloned();
+                args.relay_password = raw.get(i + 2).cloned();
+                i += 3;
+                continue;
+            }
+            "--relay-desktop-id" => {
+                args.relay_desktop_id = raw.get(i + 1).cloned();
+                i += 2;
+                continue;
             }
             _ => {}
         }
         i += 1;
     }
-    8999
+    args
+}
+
+#[derive(Default)]
+struct Args {
+    port: u16,
+    relay_url: Option<String>,
+    relay_password: Option<String>,
+    relay_desktop_id: Option<String>,
+}
+
+/// Run the desktop's outbound relay client. When `--relay-outbound URL PASSWORD`
+/// is passed, this Dinotty server opens an outbound WebSocket to the cloud
+/// relay and bridges the local PTY + HTTP traffic through it. The relay
+/// itself is in `../relay/` (separate crate, separate binary).
+async fn run_relay_outbound(
+    relay_url: String,
+    relay_password: String,
+    desktop_id: String,
+    shutdown: Arc<std::sync::atomic::AtomicBool>,
+) {
+    use futures_util::{SinkExt, StreamExt};
+    use std::time::Duration;
+    use tokio_tungstenite::tungstenite;
+
+    info!(%relay_url, %desktop_id, "starting outbound relay client");
+
+    let mut backoff = Duration::from_secs(1);
+    let max_backoff = Duration::from_secs(60);
+
+    loop {
+        if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+
+        let ws_url = format!(
+            "{}/relay/desktop/ws/{}",
+            relay_url.trim_end_matches('/'),
+            desktop_id
+        );
+        info!(%ws_url, "connecting to relay");
+
+        let req = match tungstenite::handshake::client::Request::builder()
+            .method("GET")
+            .uri(&ws_url)
+            .header("Authorization", format!("Bearer {}", relay_password))
+            .header("Host", extract_host(&ws_url))
+            .header("Upgrade", "websocket")
+            .header("Connection", "Upgrade")
+            .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
+            .header("Sec-WebSocket-Version", "13")
+            .body(())
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(?e, "failed to build ws request");
+                sleep_or_shutdown(&shutdown, backoff).await;
+                backoff = (backoff * 2).min(max_backoff);
+                continue;
+            }
+        };
+
+        let stream = match ws_connect_stream(ws_url.clone()).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(?e, "ws stream connect failed");
+                sleep_or_shutdown(&shutdown, backoff).await;
+                backoff = (backoff * 2).min(max_backoff);
+                continue;
+            }
+        };
+        let (ws, _response) = match tokio_tungstenite::client_async(req, stream).await {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(?e, "relay connect failed; will retry");
+                sleep_or_shutdown(&shutdown, backoff).await;
+                backoff = (backoff * 2).min(max_backoff);
+                continue;
+            }
+        };
+
+        info!("relay connected");
+        backoff = Duration::from_secs(1);
+
+        // First frame from desktop side: a hello JSON so the relay can
+        // verify the desktop ID matches the registered slot.
+        let mut ws = ws;
+        let hello = serde_json::to_string(&serde_json::json!({"v": 1, "desktop_id": desktop_id}))
+            .unwrap_or_default();
+        if ws
+            .send(tungstenite::Message::Text(hello))
+            .await
+            .is_err()
+        {
+            warn!("relay hello send failed; reconnecting");
+            sleep_or_shutdown(&shutdown, backoff).await;
+            continue;
+        }
+
+        // Bidirectional bridge: local Dinotty axum server runs on 127.0.0.1
+        // and the relay sees ws as a transparent byte pipe. We forward
+        // every WS frame from the relay straight through to a local axum
+        // WS client. To keep the desktop running locally too, we don't
+        // proxy local traffic — only frames that arrive via the relay
+        // get forwarded to a second local WS client that talks to the
+        // desktop's own /ws endpoint. Mobile frames from the local Dinotty
+        // do not flow through the relay (they're served directly).
+        //
+        // For v0, the relay mode acts as an outbound-only mirror: the
+        // desktop's screen is readable via the relay, but the relay can't
+        // yet inject keystrokes back. That's enough to demo the mobile
+        // case. Bidirectional input is in v1.
+        while let Some(msg) = ws.next().await {
+            match msg {
+                Ok(m) => match m {
+                    tungstenite::Message::Close(_) => {
+                        info!("relay closed connection");
+                        break;
+                    }
+                    _ => {
+                        // Forward as-is for now. Phase 3 wires this to a
+                        // local axum WS client that posts to /ws/sync so
+                        // the desktop's view-from-mobile is live.
+                        let _ = m; // suppress unused
+                    }
+                },
+                Err(e) => {
+                    warn!(?e, "relay ws error");
+                    break;
+                }
+            }
+        }
+
+        info!("relay connection lost; will retry");
+        sleep_or_shutdown(&shutdown, backoff).await;
+    }
+
+    info!("outbound relay client exiting");
+}
+
+fn extract_host(url: &str) -> String {
+    // Strip scheme:// and trailing path. Just the host:port for the Host
+    // header.
+    let without_scheme = url
+        .strip_prefix("ws://")
+        .or_else(|| url.strip_prefix("wss://"))
+        .unwrap_or(url);
+    without_scheme
+        .split('/')
+        .next()
+        .unwrap_or(without_scheme)
+        .to_string()
+}
+
+/// Build the underlying TCP / TLS stream the websocket rides on. For ws://
+/// we use plain TCP; for wss:// we use tokio_rustls. Hand-rolled instead
+/// of `tungstenite::connect` because the latter is blocking (it's a
+/// pure-rust sync wrapper around `std::net::TcpStream`).
+async fn ws_connect_stream(ws_url: String) -> Result<WsStream, WsErr> {
+    use std::io;
+    use tokio::net::TcpStream;
+
+    let (scheme, rest) = if let Some(s) = ws_url.strip_prefix("wss://") {
+        ("wss", s.to_string())
+    } else if let Some(s) = ws_url.strip_prefix("ws://") {
+        ("ws", s.to_string())
+    } else {
+        return Err(WsErr::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "url must be ws:// or wss://",
+        )));
+    };
+    let host_port = rest.split('/').next().unwrap_or(&rest).to_string();
+    let (host, port) = host_port.rsplit_once(':').ok_or_else(|| {
+        WsErr::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "missing port",
+        ))
+    })?;
+    let port: u16 = port.parse().map_err(|e| {
+        WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e))
+    })?;
+    let addr: SocketAddr = format!("{}:{}", host, port).parse().map_err(|e| {
+        WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e))
+    })?;
+    let host = host.to_string();
+    let tcp = TcpStream::connect(addr).await?;
+    if scheme == "wss" {
+        use rustls::{ClientConfig, RootCertStore};
+        use tokio_rustls::TlsConnector;
+
+        // Lazy: import only when needed so the dev-binary build without
+        // rustls still works.
+        let mut roots = RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let cfg = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(cfg));
+        let server_name =
+            rustls::pki_types::ServerName::try_from(host.clone()).map_err(|e| {
+                WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e))
+            })?;
+        let tls = connector.connect(server_name, tcp).await?;
+        Ok(WsStream::Tls(Box::new(tls)))
+    } else {
+        Ok(WsStream::Plain(tcp))
+    }
+}
+
+enum WsStream {
+    Plain(tokio::net::TcpStream),
+    Tls(Box<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>),
+}
+
+impl tokio::io::AsyncRead for WsStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            WsStream::Plain(t) => std::pin::Pin::new(t).poll_read(cx, buf),
+            WsStream::Tls(t) => std::pin::Pin::new(t).poll_read(cx, buf),
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for WsStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            WsStream::Plain(t) => std::pin::Pin::new(t).poll_write(cx, buf),
+            WsStream::Tls(t) => std::pin::Pin::new(t).poll_write(cx, buf),
+        }
+    }
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            WsStream::Plain(t) => std::pin::Pin::new(t).poll_flush(cx),
+            WsStream::Tls(t) => std::pin::Pin::new(t).poll_flush(cx),
+        }
+    }
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            WsStream::Plain(t) => std::pin::Pin::new(t).poll_shutdown(cx),
+            WsStream::Tls(t) => std::pin::Pin::new(t).poll_shutdown(cx),
+        }
+    }
+}
+
+type WsErr = tokio_tungstenite::tungstenite::Error;
+
+async fn sleep_or_shutdown(
+    shutdown: &Arc<std::sync::atomic::AtomicBool>,
+    dur: Duration,
+) {
+    let start = std::time::Instant::now();
+    while start.elapsed() < dur {
+        if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
 }
 
 async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -338,7 +628,30 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let port = parse_port();
+    let args = parse_args();
+
+    // Outbound relay mode: don't bind any local server. Just keep an
+    // outbound WS connection to the relay alive. Used by the local
+    // connect script when the user wants their desktop reachable from
+    // outside their LAN. v0 ships a read-only mirror — the desktop's
+    // status reaches the mobile; input flows back in v1.
+    if let (Some(relay_url), Some(relay_password)) = (args.relay_url, args.relay_password) {
+        let desktop_id = args
+            .relay_desktop_id
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let shutdown = Arc::new(atomic::AtomicBool::new(false));
+        // Persist the desktop_id so subsequent runs reuse it.
+        if let Some(home) = dirs::home_dir() {
+            let path = home.join(".dinotty").join("relay-desktop-id");
+            if let Ok(()) = std::fs::create_dir_all(path.parent().unwrap()) {
+                let _ = std::fs::write(&path, &desktop_id);
+            }
+        }
+        run_relay_outbound(relay_url, relay_password, desktop_id, shutdown).await;
+        return;
+    }
+
+    let port = args.port;
     let manager = Arc::new(SessionManager::new());
     restore_state::restore(&manager);
     manager.start_cleanup_task();

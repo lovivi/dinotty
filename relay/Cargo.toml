@@ -1,0 +1,56 @@
+[package]
+name = "dinotty-relay"
+version = "0.12.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/xichan96/dinotty"
+
+[dependencies]
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+futures-util = "0.3"
+dashmap = "5"
+rust-embed = { version = "8", features = ["axum"] }
+mime_guess = "2"
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["url", "connect"] }
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+subtle = "2"
+rand = "0.8"
+
+[dev-dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+doc_markdown = "allow"
+needless_continue = "allow"
+# Style preferences — let-else is fine but we have explicit matches that
+# read more clearly. Allow manual_let_else so clippy doesn't push us.
+manual_let_else = "allow"
+# `if let` vs single-pattern match is a stylistic preference.
+single_match_else = "allow"
+# Trailing semicolons after a single-statement block — clippy flag is OK
+# but we want trailing-semi consistency.
+semicolon_inside_block = "allow"
+semicolon_if_nothing_returned = "allow"
+
+[[bin]]
+name = "dinotty-relay"
+path = "src/main.rs"
+
+# Embed the frontend dist built by the parent project's `pnpm build`.
+# Path is resolved relative to this manifest, so the build flow is:
+#   1. (in repo root) pnpm --filter ./frontend build        → frontend/dist/
+#   2. cargo build --manifest-path relay/Cargo.toml         → dinotty-relay
+[package.metadata.embed]
+dist = "../frontend/dist"

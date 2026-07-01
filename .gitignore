@@ -10,3 +10,6 @@ CLAUDE.md
 .pnpm-store/
 .DS_Store
 src-tauri/gen/schemas/
+relay/target/
+**/target/
+dist-new/
