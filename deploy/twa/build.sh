@@ -111,7 +111,8 @@ fi
 "$JAVAC" -source 17 -target 17 \
     -classpath "$PLATFORM_JAR" \
     -d "$OUTDIR/classes" \
-    $JAVA_FILES
+    $JAVA_FILES \
+    $(find "$OUTDIR/gen" -name "*.java" 2>/dev/null || true)
 
 # ---------- Step 4: d8 dex ----------
 echo ">>> [4/8] d8..."

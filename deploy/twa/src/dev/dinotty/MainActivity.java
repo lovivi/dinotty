@@ -235,10 +235,8 @@ public class MainActivity extends Activity {
         }
 
         @Override
-        public void onReceivedError(WebView view, WebResourceRequest request,
-                                    WebResourceResponse errorResponse) {
-            // Only the top-level navigation gets the full-screen overlay; sub-
-            // resource failures are surfaced through console only.
+        public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                        WebResourceResponse errorResponse) {
             if (request != null && request.isForMainFrame()) {
                 showErrorPage();
             }
