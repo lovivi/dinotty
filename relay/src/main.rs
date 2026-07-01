@@ -108,7 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .or_else(|| args.password.clone())
         .ok_or("RELAY_PASSWORD or --password is required")?;
-    let listen = args.listen.unwrap_or_else(|| "0.0.0.0:9000".to_string());
+    let listen = args.listen.clone();
     let cert = args.cert;
     let key = args.key;
 
@@ -131,23 +131,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .fallback(proxy::proxy_fallback)
         .with_state(state);
 
+    // Port detection: prefer 24020-24045. If --listen was given, use that port.
+    let (listen, prebound): (String, Option<tokio::net::TcpListener>) = match listen {
+        Some(l) => {
+            let addr: SocketAddr = l.parse().unwrap();
+            let l = tokio::net::TcpListener::bind(addr).await.unwrap();
+            let port = l.local_addr().unwrap().port();
+            (format!("0.0.0.0:{}", port), Some(l))
+        }
+        None => {
+            let mut chosen = None;
+            for port in 24020u16..=24045 {
+                let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
+                if let Ok(l) = tokio::net::TcpListener::bind(addr).await {
+                    info!("relay port auto-selected: {}", port);
+                    chosen = Some(l);
+                    break;
+                }
+            }
+            match chosen {
+                Some(l) => {
+                    let port = l.local_addr().unwrap().port();
+                    (format!("0.0.0.0:{}", port), Some(l))
+                }
+                None => {
+                    warn!("ports 24020-24045 busy; using random port");
+                    let l = tokio::net::TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).await.unwrap();
+                    let port = l.local_addr().unwrap().port();
+                    (format!("0.0.0.0:{}", port), Some(l))
+                }
+            }
+        }
+    };
+
     info!("dinotty-relay listening on {}", listen);
 
-    let addr: SocketAddr = listen.parse()?;
     if let (Some(cert_path), Some(key_path)) = (cert, key) {
+        let addr: SocketAddr = listen.parse().unwrap();
         let config =
-            axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path).await?;
+            axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path).await.unwrap();
         axum_server::bind_rustls(addr, config)
             .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await?;
-    } else {
+            .await
+            .unwrap();
+    } else if let Some(listener) = prebound {
         warn!("running with HTTP (no TLS) — phones may block WebSockets");
-        let listener = tokio::net::TcpListener::bind(addr).await?;
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .await?;
+        .await
+        .unwrap();
     }
     Ok(())
 }

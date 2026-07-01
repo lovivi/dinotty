@@ -102,14 +102,14 @@ chmod 0600 "$ENV_FILE"
 # ---- Write systemd unit ----
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Dinotty cloud relay (HTTPS :9000)
+Description=Dinotty cloud relay (port auto-detect 24020-24045)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 EnvironmentFile=${ENV_FILE}
-ExecStart=${INSTALL_DIR}/dinotty-relay --listen 0.0.0.0:9000 --cert ${CERT_PATH} --key ${KEY_PATH}
+ExecStart=${INSTALL_DIR}/dinotty-relay --cert ${CERT_PATH} --key ${KEY_PATH}
 Restart=always
 RestartSec=5
 LimitNOFILE=65536
@@ -127,6 +127,11 @@ if ! systemctl is-active --quiet "$SERVICE_NAME"; then
     exit 1
 fi
 
+# ---- Detect relay port from journal ----
+sleep 2
+RELAY_PORT=$(journalctl -u "$SERVICE_NAME" -n 30 --no-pager 2>/dev/null | grep -oP 'port auto-selected: \K\d+' | tail -1)
+RELAY_PORT="${RELAY_PORT:-24020}"
+
 # ---- Detect public IP ----
 PUBLIC_IP="$(
     curl -fsS --connect-timeout 5 https://api.ipify.org 2>/dev/null \
@@ -143,10 +148,10 @@ cat <<EOF
 
   Copy this line. On the desktop where Dinotty runs:
 
-    curl -sSL https://raw.githubusercontent.com/${REPO}/feat/windows-shell-profiles/deploy/relay/local-connect.sh | bash -s -- "ws://${PUBLIC_IP}:9000" "\$(cat ${ENV_FILE} | grep -oP 'RELAY_PASSWORD=\\K.*')"
+    curl -sSL https://raw.githubusercontent.com/${REPO}/feat/windows-shell-profiles/deploy/relay/local-connect.sh | bash -s -- "ws://${PUBLIC_IP}:${RELAY_PORT}" "\$(cat ${ENV_FILE} | grep -oP 'RELAY_PASSWORD=\\K.*')"
 
   Or just open the Dinotty APK on your phone, enter:
-    URL:      https://${PUBLIC_IP}:9000
+    URL:      https://${PUBLIC_IP}:${RELAY_PORT}
     Password: ${PASSWORD}
 ============================================================
 
