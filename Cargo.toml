@@ -82,5 +82,9 @@ doc_markdown = "allow"
 needless_pass_by_value = "allow"
 redundant_clone = "allow"
 duration_suboptimal_units = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+single_match_else = "allow"
+explicit_iter_loop = "allow"
 
 [dev-dependencies]

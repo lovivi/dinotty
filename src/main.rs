@@ -288,13 +288,15 @@ struct Args {
 
 /// Run the desktop's outbound relay client. When `--relay-outbound URL PASSWORD`
 /// is passed, this Dinotty server opens an outbound WebSocket to the cloud
-/// relay and bridges the local PTY + HTTP traffic through it. The relay
-/// itself is in `../relay/` (separate crate, separate binary).
+/// relay and pushes terminal screen state through it. v0 is read-only —
+/// the desktop periodically snapshots the active pane and ships it; in v1
+/// we'll bridge input frames the other way too.
 async fn run_relay_outbound(
     relay_url: String,
     relay_password: String,
     desktop_id: String,
-    shutdown: Arc<std::sync::atomic::AtomicBool>,
+    manager: Arc<SessionManager>,
+    shutdown: Arc<atomic::AtomicBool>,
 ) {
     use futures_util::{SinkExt, StreamExt};
     use std::time::Duration;
@@ -374,37 +376,74 @@ async fn run_relay_outbound(
             continue;
         }
 
-        // Bidirectional bridge: local Dinotty axum server runs on 127.0.0.1
-        // and the relay sees ws as a transparent byte pipe. We forward
-        // every WS frame from the relay straight through to a local axum
-        // WS client. To keep the desktop running locally too, we don't
-        // proxy local traffic — only frames that arrive via the relay
-        // get forwarded to a second local WS client that talks to the
-        // desktop's own /ws endpoint. Mobile frames from the local Dinotty
-        // do not flow through the relay (they're served directly).
-        //
-        // For v0, the relay mode acts as an outbound-only mirror: the
-        // desktop's screen is readable via the relay, but the relay can't
-        // yet inject keystrokes back. That's enough to demo the mobile
-        // case. Bidirectional input is in v1.
-        while let Some(msg) = ws.next().await {
-            match msg {
-                Ok(m) => match m {
-                    tungstenite::Message::Close(_) => {
-                        info!("relay closed connection");
-                        break;
+        // v0: read-only outbound. We split the WS and run two tasks:
+        //   - reader: drains incoming frames (server → desktop). v0 has no
+        //     such frames; we just keep the channel open so the connection
+        //     stays alive.
+        //   - screen ticker: every 200ms, snapshot the active pane's
+        //     screen and push it as a Text frame tagged with the pane_id
+        //     so the relay/mobile can route it.
+        let (mut ws_tx, mut ws_rx) = ws.split();
+        let manager_for_reader = manager.clone();
+        let desktop_id_for_reader = desktop_id.clone();
+        let manager_for_screen = manager.clone();
+        let desktop_id_for_screen = desktop_id.clone();
+        let shutdown_for_screen = shutdown.clone();
+        let desktop_id_for_log = desktop_id.clone();
+
+        // Reader task
+        let reader = tokio::spawn(async move {
+            while let Some(msg) = ws_rx.next().await {
+                match msg {
+                    Ok(m) => {
+                        // v0: incoming frames are not used. We only keep the
+                        // connection open. Log them in case v1 wiring is
+                        // useful for debugging.
+                        if matches!(m, tungstenite::Message::Close(_)) {
+                            break;
+                        }
+                        let _ = &manager_for_reader; // keep compiler happy
+                        let _ = &desktop_id_for_reader;
                     }
-                    _ => {
-                        // Forward as-is for now. Phase 3 wires this to a
-                        // local axum WS client that posts to /ws/sync so
-                        // the desktop's view-from-mobile is live.
-                        let _ = m; // suppress unused
-                    }
-                },
-                Err(e) => {
-                    warn!(?e, "relay ws error");
+                    Err(_) => break,
+                }
+            }
+            info!(desktop_id = %desktop_id_for_log, "relay reader ended");
+        });
+
+        // Screen-ticker task
+        let screen = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(200));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if shutdown_for_screen.load(atomic::Ordering::Relaxed) {
                     break;
                 }
+                let payload = snapshot_active_pane(&manager_for_screen);
+                if let Some(payload) = payload {
+                    let frame = serde_json::to_string(&payload).unwrap_or_default();
+                    if ws_tx
+                        .send(tungstenite::Message::Text(frame))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+            info!(desktop_id = %desktop_id_for_screen, "relay screen ticker ended");
+        });
+
+        // Wait for either task to finish. Reader finishing = relay closed;
+        // screen finishing = something internal failed. Either way, exit
+        // the outer loop and reconnect.
+        tokio::select! {
+            _ = &mut Box::pin(reader) => {
+                info!("relay reader ended; reconnecting");
+            }
+            _ = &mut Box::pin(screen) => {
+                warn!("relay screen ticker ended; reconnecting");
             }
         }
 
@@ -537,16 +576,34 @@ impl tokio::io::AsyncWrite for WsStream {
 type WsErr = tokio_tungstenite::tungstenite::Error;
 
 async fn sleep_or_shutdown(
-    shutdown: &Arc<std::sync::atomic::AtomicBool>,
+    shutdown: &Arc<atomic::AtomicBool>,
     dur: Duration,
 ) {
     let start = std::time::Instant::now();
     while start.elapsed() < dur {
-        if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+        if shutdown.load(atomic::Ordering::Relaxed) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+/// Snapshot the currently-active pane's screen for relay forwarding.
+/// Returns a JSON object `{ type, pane_id, screen, cols, rows }` or
+/// `None` if no active pane / session exists.
+fn snapshot_active_pane(manager: &SessionManager) -> Option<serde_json::Value> {
+    let snap = manager.active_pane_snapshot().ok()?;
+    let session = manager.sessions.get(&snap.pane_id)?;
+    let (cols, rows) = *session.size.lock().ok()?;
+    let screen = session.screen.lock().ok()?;
+    let text = screen.snapshot();
+    Some(serde_json::json!({
+        "type": "screen",
+        "pane_id": snap.pane_id,
+        "cols": cols,
+        "rows": rows,
+        "screen": text,
+    }))
 }
 
 async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -640,6 +697,14 @@ async fn main() {
             .relay_desktop_id
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let shutdown = Arc::new(atomic::AtomicBool::new(false));
+
+        // Restore any prior tabs from disk so the screen snapshot has
+        // something to read on a freshly-restarted desktop. The
+        // SessionManager is otherwise unused in this mode — no axum
+        // server runs, no PTY spawns.
+        let manager = Arc::new(SessionManager::new());
+        restore_state::restore(&manager);
+
         // Persist the desktop_id so subsequent runs reuse it.
         if let Some(home) = dirs::home_dir() {
             let path = home.join(".dinotty").join("relay-desktop-id");
@@ -647,7 +712,7 @@ async fn main() {
                 let _ = std::fs::write(&path, &desktop_id);
             }
         }
-        run_relay_outbound(relay_url, relay_password, desktop_id, shutdown).await;
+        run_relay_outbound(relay_url, relay_password, desktop_id, manager, shutdown).await;
         return;
     }
 

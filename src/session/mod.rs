@@ -430,7 +430,7 @@ pub struct SessionManager {
     pub event_bus: EventBus,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SyncMsg {
     TabList {
@@ -477,6 +477,17 @@ pub enum SyncMsg {
 }
 
 #[derive(Serialize, Clone)]
+/// Snapshot of the currently-active pane — used by the relay-outbound
+/// screen ticker to know which pane's screen to read. Cheap to construct;
+/// does NOT hold any locks (the screen snapshot is taken separately
+/// under the session's own screen mutex).
+pub struct ActivePaneSnapshot {
+    pub pane_id: String,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Clone, Serialize)]
 pub struct TabInfo {
     pub tab_id: String,
     pub pane_id: String,
@@ -687,6 +698,47 @@ impl SessionManager {
 
     /// # Panics
     /// Panics if the internal mutex is poisoned.
+    pub fn active_pane_snapshot(&self) -> Result<ActivePaneSnapshot, &'static str> {
+        // 1. Resolve the active pane_id (a leaf) from the global
+        //    active_pane_id cursor, falling back to "the only leaf in
+        //    the only tab" if the cursor is unset.
+        let pane_id_opt = self
+            .active_pane_id
+            .lock()
+            .expect("mutex poisoned")
+            .clone();
+        let pane_id = match pane_id_opt {
+            Some(id) => id,
+            None => {
+                // No cursor — find the only leaf in the only tab.
+                let mut found: Option<String> = None;
+                for entry in self.tab_layouts.iter() {
+                    let v = entry.value();
+                    let layout = v.get("layout");
+                    if let Some(layout) = layout {
+                        for leaf in collect_leaf_pane_ids(layout) {
+                            if self.sessions.contains_key(&leaf) {
+                                if found.is_some() {
+                                    return Err("no clear active pane");
+                                }
+                                found = Some(leaf);
+                            }
+                        }
+                    }
+                }
+                found.ok_or("no active pane")?
+            }
+        };
+
+        // 2. Read the (cols, rows) from the session's size field.
+        let session = self
+            .sessions
+            .get(&pane_id)
+            .ok_or("session not found for active pane")?;
+        let (cols, rows) = *session.size.lock().expect("mutex poisoned");
+        Ok(ActivePaneSnapshot { pane_id, cols, rows })
+    }
+
     pub fn tab_list(&self) -> (Vec<TabInfo>, Option<String>) {
         // Prune stale tab layouts whose leaf pane_ids no longer have sessions.
         // Without this, tab_layouts entries accumulate forever (phantom tabs).
