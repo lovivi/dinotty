@@ -293,7 +293,6 @@ fn parse_args() -> Args {
     args
 }
 
-#[derive(Default)]
 struct Args {
     port: u16,
     relay_url: Option<String>,
@@ -1048,11 +1047,15 @@ async fn main() {
 
     let args = parse_args();
 
-    // Outbound relay mode: don't bind any local server. Just keep an
-    // outbound WS connection to the relay alive. Used by the local
-    // connect script when the user wants their desktop reachable from
-    // outside their LAN. v0 ships a read-only mirror — the desktop's
-    // status reaches the mobile; input flows back in v1.
+    // Outbound relay mode: connects to a cloud relay (run by
+    // server-install.sh) and forwards incoming WS/HTTP requests to
+    // another local dinotty-server instance. The outbound mode does
+    // NOT start its own HTTP server — it assumes a normal dinotty-server
+    // is already running on the same machine (same --port).
+    //
+    // Usage:
+    //   Terminal 1: dinotty-server --port 8999
+    //   Terminal 2: dinotty-server --port 8999 --relay-outbound <relay-url> <password>
     if let (Some(relay_url), Some(relay_password)) = (args.relay_url, args.relay_password) {
         let desktop_id = args
             .relay_desktop_id
