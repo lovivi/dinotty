@@ -30,15 +30,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Install Android SDK packages. The runner pre-installs cmdline-tools
-      # 16.0 at /usr/local/lib/android/sdk/cmdline-tools/latest. We don't
-      # use the action's `packages:` field because the versioned package
-      # names (build-tools;35.0.0, platform;android-35) trigger "Failed
-      # to find package" errors against this cmdline-tools 16.0; calling
+      # Install Android SDK packages. The runner pre-installs
+      # cmdline-tools 16.0 at /usr/local/lib/android/sdk/cmdline-tools/
+      # latest. We don't use the action's `packages:` field because the
+      # versioned names (build-tools;35.0.0, platforms;android-35) trip
+      # "Failed to find package" against this cmdline-tools 16.0; calling
       # sdkmanager directly with the right names works.
       - name: Install Android SDK
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
+          PATH: /usr/local/lib/android/sdk/cmdline-tools/latest/bin:/usr/local/lib/android/sdk/platform-tools:/usr/bin:/bin
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager \
