@@ -441,8 +441,28 @@ pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Embedded server listening on http://0.0.0.0:{}", port);
+    tracing::info!(
+        port,
+        config_dir = %dirs::config_dir().unwrap_or_default().to_string_lossy(),
+        version = env!("CARGO_PKG_VERSION"),
+        "Embedded server started",
+    );
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            tracing::error!(
+                port,
+                "Port {} is already in use. Only one Dinotty instance can run at a time. \
+                 Close the other instance or use a different port.",
+                port,
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            tracing::error!("Failed to bind to {}: {}", addr, e);
+            std::process::exit(1);
+        }
+    };
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await.unwrap();
 }
