@@ -1,5 +1,11 @@
 <template>
-  <SetupPage v-if="!authenticated && needsSetup" @success="onLoginSuccess" />
+  <RemoteScreen
+    v-if="remoteMode"
+    :relay-url="remoteRelayUrl"
+    :desktop-id="remoteMode.desktopId"
+    :token="remoteMode.token"
+  />
+  <SetupPage v-else-if="!authenticated && needsSetup" @success="onLoginSuccess" />
   <LoginPage v-else-if="!authenticated" @success="onLoginSuccess" />
   <div v-else id="app-root">
     <TabBar
@@ -235,6 +241,7 @@ import {
   checkTokenConfigured,
   setAuthToken,
 } from './composables/apiBase'
+import RemoteScreen from './components/remote/RemoteScreen.vue'
 import { isTauri, tauriInvoke } from './composables/useTransport'
 import { isTouchDevice, setActivePaneId } from './composables/useTerminal'
 import { useI18n } from './composables/useI18n'
@@ -285,6 +292,32 @@ const settingsStore = useSettingsStore()
 const appSettings = settingsStore.settings
 
 const windowCloseConfirmVisible = ref(false)
+
+// ── Relay / mobile remote mode ──────────────────────────────────
+// When the app is loaded via a relay URL (e.g. inside the Dinotty TWA
+// on a phone, or as a desktop viewer), the URL looks like:
+//
+//   https://relay/?desktop_id=<uuid>#<password>
+//
+// The password comes via URL fragment (so it isn't sent to the
+// server) and is stashed in localStorage on first load. The
+// `<RemoteScreen>` component then takes over the viewport, hiding all
+// the normal Dinotty UI.
+const remoteMode = ref<{ desktopId: string; token: string } | null>(null)
+const remoteRelayUrl = computed(() =>
+  typeof window === 'undefined' ? '' : window.location.origin
+)
+function parseRelayMode() {
+  if (typeof window === 'undefined') return
+  const params = new URLSearchParams(window.location.search)
+  const desktopId = params.get('desktop_id')
+  if (!desktopId) return
+  const fragment = window.location.hash.replace(/^#/, '')
+  if (fragment) {
+    setAuthToken(fragment)
+  }
+  remoteMode.value = { desktopId, token: fragment }
+}
 
 let linkJustActivated = false
 
@@ -1482,6 +1515,7 @@ function onWindowCloseCancel() {
 }
 
 onMounted(async () => {
+  parseRelayMode()
   setupTauriWindowClose()
   document.addEventListener('keydown', onGlobalKeydown)
   window.addEventListener('focus', _focusHandler)
