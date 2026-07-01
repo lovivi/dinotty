@@ -301,6 +301,17 @@ struct Args {
     relay_desktop_id: Option<String>,
 }
 
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            port: 8999,
+            relay_url: None,
+            relay_password: None,
+            relay_desktop_id: None,
+        }
+    }
+}
+
 /// Run the desktop's outbound relay client. When `--relay-outbound URL PASSWORD`
 /// is passed, this Dinotty server opens an outbound WebSocket to the cloud
 /// relay and pushes terminal screen state through it. v0 is read-only —
