@@ -11,7 +11,7 @@
 #   JAVA_HOME                          (JDK 17 recommended)
 #
 # Required SDK packages (install via sdkmanager BEFORE running):
-#   sdkmanager "platforms;android-34" "build-tools;34.0.0"
+#   sdkmanager "platforms;android-35" "build-tools;35.0.0"
 # =============================================================================
 
 set -e
@@ -38,8 +38,8 @@ if [[ -z "${JAVA_HOME:-}" ]]; then
     exit 1
 fi
 
-BUILD_TOOLS_VER="34.0.0"
-PLATFORM_VER="34"
+BUILD_TOOLS_VER="35.0.0"
+PLATFORM_VER="35"
 BT="$SDK/build-tools/$BUILD_TOOLS_VER"
 PLATFORM_JAR="$SDK/platforms/android-$PLATFORM_VER/android.jar"
 
