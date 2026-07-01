@@ -1,0 +1,129 @@
+name: Build TWA APK
+
+# Wraps the PWA frontend in a Trusted Web Activity APK using
+# Bubblewrap (PWABuilder's CLI). The APK is the same frontend the
+# relay already serves — when the phone opens it, it loads
+# `<relay>/?desktop_id=...#...` (the URL produced by `local-connect.sh`)
+# and the frontend's <RemoteScreen> takes over.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/apk-relay]
+    paths:
+      - 'frontend/**'
+      - 'relay/**'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build-apk:
+    name: Build TWA APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Rust (for relay binary if needed)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm build
+
+      # Build the relay binary so the same CI can also publish it as
+      # an artifact (handy for self-hosting the relay on a VPS).
+      - name: Build relay binary
+        working-directory: relay
+        run: |
+          if [ ! -f Cargo.toml ]; then
+            echo "no relay/Cargo.toml — skipping relay build"
+          else
+            cargo build --release
+          fi
+
+      # Use Bubblewrap's CLI to wrap the PWA into a TWA. Bubblewrap
+      # generates an Android project that loads the start_url in a
+      # Trusted WebView, signed with a debug key for distribution as
+      # an unsigned-but-installable APK.
+      - name: Install bubblewrap
+        run: npm install -g @bubblewrap/cli
+
+      - name: Generate TWA project + build APK
+        run: |
+          mkdir -p twa
+          cd twa
+          # Bubblewrap expects a manifest.json. The frontend's PWA
+          # already ships one. We point Bubblewrap at it, override the
+          # start_url to `<relay>/?desktop_id=...` placeholder (the
+          # real value is set by the user when they run
+          # `local-connect.sh` on the desktop), and build an APK.
+          #
+          # `bubblewrap init` is interactive; we drive it via
+          # environment vars and manifest patching. The simpler
+          # alternative is `pwabuilder` (npm package) which is also
+          # what PWABuilder.com runs server-side.
+          cat > twa-manifest.json <<'EOF'
+          {
+            "name": "Dinotty",
+            "short_name": "Dinotty",
+            "start_url": "/?desktop_id=DEMO&twa=1",
+            "display": "standalone",
+            "background_color": "#000000",
+            "theme_color": "#1E1E1E",
+            "icons": [
+              { "src": "frontend/dist/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+              { "src": "frontend/dist/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+            ]
+          }
+          EOF
+          # Use @pwabuilder/cli for a non-interactive TWA build. It
+          # accepts a URL or local manifest.
+          npx --yes @pwabuilder/cli build \
+            --platform android \
+            --output ./apk \
+            ./twa-manifest.json 2>&1 | tee pwabuilder.log || {
+              echo "PWABuilder failed; falling back to manual android build" >&2
+              cat pwabuilder.log >&2
+              exit 1
+            }
+
+      - name: Locate APK
+        id: locate
+        run: |
+          find twa/apk -name '*.apk' -type f | head -1 > apk_path
+          echo "apk=$(cat apk_path)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinotty-mobile-apk
+          path: ${{ steps.locate.outputs.apk }}
+          if-no-files-found: error
+
+      - name: Upload relay binary (if built)
+        if: hashFiles('relay/Cargo.toml') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dinotty-relay
+          path: relay/target/release/dinotty-relay
+          if-no-files-found: warn
