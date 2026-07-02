@@ -6,7 +6,7 @@ use dinotty_server::restore_state;
 use dinotty_server::session::{SessionManager, SessionStatus, SyncMsg};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, State};
 
 mod embedded_server;
@@ -173,8 +173,6 @@ fn pty_detach(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<
 // A global store holds the JoinHandle so `relay_disconnect` can
 // cancel it.
 mod relay_client;
-
-use std::sync::Arc;
 
 static RELAY_HANDLE: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>> =
     std::sync::Mutex::new(None);
