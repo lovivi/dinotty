@@ -1,6 +1,9 @@
 <template>
   <div class="settings-section">
-    <h3>{{ t('remote.title') }}</h3>
+    <h3 class="section-title">
+      <span>{{ t('remote.title') }}</span>
+      <button class="help-btn" @click="showHelp = true" title="Setup guide">?</button>
+    </h3>
 
     <div class="remote-status-row">
       <span class="remote-status-dot" :class="statusClass" />
@@ -32,6 +35,50 @@
     <p v-if="!isTauri" class="remote-hint">
       {{ t('remote.desktopOnlyHint') }}
     </p>
+
+    <!-- Help / setup guide dialog -->
+    <div v-if="showHelp" class="modal-backdrop" @click.self="showHelp = false">
+      <div class="help-modal">
+        <div class="help-modal-header">
+          <h2>{{ t('remote.helpTitle') }}</h2>
+          <button class="modal-close" @click="showHelp = false">×</button>
+        </div>
+
+        <div class="help-modal-body">
+          <h3>1. {{ t('remote.helpStep1Title') }}</h3>
+          <p class="help-step-desc">{{ t('remote.helpStep1Desc') }}</p>
+          <div class="help-code-block">
+            <code>curl -sSL https://raw.githubusercontent.com/lovivi/dinotty/feat/windows-shell-profiles/deploy/relay/server-install.sh | sudo bash -s -- mypassword123</code>
+            <button class="help-copy-btn" @click="copyText('curl -sSL https://raw.githubusercontent.com/lovivi/dinotty/feat/windows-shell-profiles/deploy/relay/server-install.sh | sudo bash -s -- mypassword123')">
+              {{ copied === 'server' ? '✓' : 'Copy' }}
+            </button>
+          </div>
+          <p class="help-step-hint">{{ t('remote.helpStep1Hint') }}</p>
+
+          <h3>2. {{ t('remote.helpStep2Title') }}</h3>
+          <p class="help-step-desc">{{ t('remote.helpStep2Desc') }}</p>
+          <div class="help-code-block">
+            <code>E:\dinotty-builds\Dinotty_0.12.1_mobile_v3.apk</code>
+            <button class="help-copy-btn" @click="copyText('E:\\dinotty-builds\\Dinotty_0.12.1_mobile_v3.apk')">
+              {{ copied === 'apk' ? '✓' : 'Copy' }}
+            </button>
+          </div>
+
+          <h3>3. {{ t('remote.helpStep3Title') }}</h3>
+          <p class="help-step-desc">{{ t('remote.helpStep3Desc') }}</p>
+
+          <div class="help-quick-ref">
+            <h4>{{ t('remote.helpQuickRef') }}</h4>
+            <table>
+              <tr><th>{{ t('remote.helpColItem') }}</th><th>{{ t('remote.helpColWhere') }}</th></tr>
+              <tr><td>Server VPS one-liner</td><td>{{ t('remote.helpRefServer') }}</td></tr>
+              <tr><td>APK for phone</td><td>{{ t('remote.helpRefApk') }}</td></tr>
+              <tr><td>Windows desktop</td><td>{{ t('remote.helpRefWindows') }}</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -48,8 +95,32 @@ const password = ref('')
 const desktopId = ref('')
 const connected = ref(false)
 const connecting = ref(false)
+const showHelp = ref(false)
+const copied = ref<string | null>(null)
 
 const RELAY_STORAGE_KEY = 'dinotty_relay_config'
+
+async function copyText(text: string) {
+  const key = text.startsWith('curl') ? 'server' : 'apk'
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copied.value = key
+    setTimeout(() => { if (copied.value === key) copied.value = null }, 1500)
+  } catch (e) {
+    console.error('copy failed', e)
+  }
+}
 
 const statusClass = computed(() => {
   if (connecting.value) return 'status-connecting'
@@ -206,5 +277,168 @@ async function disconnect() {
   color: var(--fg, #c7c7c7);
   white-space: nowrap;
   min-width: 80px;
+}
+
+/* ── Section title with help button ─────────────────────────── */
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.help-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border, #333);
+  background: var(--bg-input, #1a1a1a);
+  color: var(--fg-muted, #666);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.help-btn:hover {
+  border-color: var(--accent, #7C3AED);
+  color: var(--accent, #7C3AED);
+}
+
+/* ── Help modal ───────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.help-modal {
+  background: var(--bg-surface, #1a1a1a);
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  max-width: 560px;
+  width: 100%;
+  max-height: 86vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+.help-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border, #333);
+}
+.help-modal-header h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-bright, #f0f6fc);
+}
+.modal-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: none;
+  border: none;
+  color: var(--fg-muted, #666);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.modal-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-bright, #f0f6fc);
+}
+.help-modal-body {
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.help-modal-body h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-bright, #f0f6fc);
+  margin-top: 6px;
+}
+.help-step-desc,
+.help-step-hint {
+  font-size: 12px;
+  color: var(--fg-muted, #888);
+  line-height: 1.5;
+}
+.help-step-hint {
+  margin-top: -4px;
+}
+.help-code-block {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-input, #0a0a0a);
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg, #c7c7c7);
+  word-break: break-all;
+}
+.help-code-block code {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+}
+.help-copy-btn {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  background: var(--accent, #7C3AED);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+.help-copy-btn:hover {
+  opacity: 0.85;
+}
+.help-quick-ref {
+  margin-top: 4px;
+  background: var(--bg-input, #0a0a0a);
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+.help-quick-ref h4 {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-muted, #666);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+.help-quick-ref table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.help-quick-ref th,
+.help-quick-ref td {
+  text-align: left;
+  padding: 3px 6px;
+  color: var(--fg, #c7c7c7);
+}
+.help-quick-ref th {
+  color: var(--fg-muted, #666);
+  font-weight: 500;
 }
 </style>
