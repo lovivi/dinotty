@@ -28,7 +28,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: relay -> target
-          cache-on-failure: false
+          key: relay-v2
 
       - name: Build x86_64
         working-directory: relay
