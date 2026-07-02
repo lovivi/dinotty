@@ -25,6 +25,7 @@
         <KeyboardTab v-show="activeTab === 'keyboard'" />
         <MonitorTab v-show="activeTab === 'monitor'" />
         <NotificationTab v-show="activeTab === 'notification'" />
+        <RemoteTab v-show="activeTab === 'remote'" />
         <PluginsTab v-show="activeTab === 'plugins'" />
         <AboutTab v-show="activeTab === 'about'" />
       </div>
@@ -43,6 +44,7 @@ import {
   Activity,
   Bell,
   Puzzle,
+  Globe,
   Info,
   X,
 } from 'lucide-vue-next'
@@ -52,6 +54,7 @@ import KeyboardTab from './settings/KeyboardTab.vue'
 const MonitorTab = defineAsyncComponent(() => import('./settings/MonitorTab.vue'))
 import NotificationTab from './settings/NotificationTab.vue'
 import PluginsTab from './settings/PluginsTab.vue'
+import RemoteTab from './settings/RemoteTab.vue'
 import AboutTab from './settings/AboutTab.vue'
 
 defineProps<{ open: boolean }>()
@@ -61,7 +64,7 @@ const { settings, saveSettings, applyCurrentTheme } = useSettings()
 const { t } = useI18n()
 
 const activeTab = ref<
-  'general' | 'appearance' | 'keyboard' | 'monitor' | 'notification' | 'plugins' | 'about'
+  'general' | 'appearance' | 'keyboard' | 'monitor' | 'notification' | 'remote' | 'plugins' | 'about'
 >('general')
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -83,6 +86,7 @@ const tabs = computed(() => [
   { id: 'general' as const, label: t('settings.tab.general'), icon: SettingsIcon },
   { id: 'appearance' as const, label: t('settings.tab.appearance'), icon: Palette },
   { id: 'keyboard' as const, label: t('settings.tab.keyboard'), icon: Keyboard },
+  { id: 'remote' as const, label: t('settings.tab.remote'), icon: Globe },
   { id: 'plugins' as const, label: t('settings.tab.plugins'), icon: Puzzle },
   { id: 'monitor' as const, label: t('settings.tab.monitor'), icon: Activity },
   { id: 'notification' as const, label: t('settings.tab.notification'), icon: Bell },

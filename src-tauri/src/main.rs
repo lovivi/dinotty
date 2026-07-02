@@ -166,6 +166,37 @@ fn pty_detach(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<
     Ok(())
 }
 
+// ── Relay client (remote access) ──────────────────────────────
+// These commands are called by the RemoteTab in settings. In v0 they
+// persist the config and log the intent; the actual outbound WS is
+// started separately (dinotty-server --relay-outbound). A future
+// version will integrate it into the Tauri process directly.
+
+#[tauri::command]
+fn relay_connect(url: String, password: String) -> Result<(), String> {
+    tracing::info!(%url, "relay_connect called — save config");
+    // Persist the config so the desktop app can pick it up on next
+    // launch or when the background task runs.
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".dinotty");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(
+            dir.join("relay-config.json"),
+            serde_json::json!({ "url": url, "password": password }).to_string(),
+        );
+        tracing::info!("relay config saved to {:?}", dir.join("relay-config.json"));
+    }
+    // TODO: spawn outbound WS task in-process
+    Ok(())
+}
+
+#[tauri::command]
+fn relay_disconnect() -> Result<(), String> {
+    tracing::info!("relay_disconnect called");
+    // TODO: cancel outbound WS task
+    Ok(())
+}
+
 #[tauri::command]
 fn embedded_http_origin() -> String {
     let port = EMBEDDED_HTTP_PORT.get().copied().unwrap_or(8999);
@@ -363,6 +394,8 @@ fn main() {
             tauri_read_file,
             tauri_download,
             close_window,
+            relay_connect,
+            relay_disconnect,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
