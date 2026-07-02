@@ -1,8 +1,8 @@
 name: Build relay release
 
-# Builds the relay binary for x86_64-unknown-linux-musl (the most
-# common VPS arch) and attaches it as a release asset. server-install.sh
-# pulls this from the latest such release.
+# Builds the relay binary and attaches it as a release asset.
+# server-install.sh pulls from this release. Built with the host
+# toolchain (glibc) — most VPSs run Ubuntu/Debian with glibc anyway.
 
 on:
   workflow_dispatch:
@@ -18,45 +18,33 @@ env:
 
 jobs:
   build-relay:
-    name: Build musl x86_64
+    name: Build x86_64 (glibc)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-musl
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: relay -> target
           cache-on-failure: false
 
-      - name: Install musl cross-compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-
       - name: Build x86_64
         working-directory: relay
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: cargo build --release
 
       - name: Package tarball
         run: |
           set -e
-          REPO_DIR="$GITHUB_WORKSPACE"
-          ART_DIR="$REPO_DIR/relay-artifacts"
-          rm -rf "$ART_DIR"
-          mkdir -p "$ART_DIR"
-          tar -cJf "$ART_DIR/dinotty-relay-amd64.tar.xz" \
-            -C "$REPO_DIR/relay/target/x86_64-unknown-linux-musl/release" \
+          mkdir -p "$GITHUB_WORKSPACE/relay-artifacts"
+          tar -cJf "$GITHUB_WORKSPACE/relay-artifacts/dinotty-relay-amd64.tar.xz" \
+            -C "$GITHUB_WORKSPACE/relay/target/release" \
             "dinotty-relay"
-          ls -lh "$ART_DIR"
 
       - name: Determine version
         id: ver
-        run: |
-          echo "version=relay-v0.12.1" >> "$GITHUB_OUTPUT"
+        run: echo "version=relay-v0.12.1" >> "$GITHUB_OUTPUT"
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
