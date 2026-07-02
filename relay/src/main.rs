@@ -33,7 +33,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use rust_embed::RustEmbed;
+use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
@@ -489,7 +489,7 @@ async fn static_handler(req: Request<Body>) -> AxumResponse {
     if path.is_empty() {
         return serve_index();
     }
-    match <Frontend as RustEmbed>::get(path) {
+    match Frontend::get(path) {
         Some(file) => {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
             Response::builder()
@@ -502,7 +502,7 @@ async fn static_handler(req: Request<Body>) -> AxumResponse {
 }
 
 fn serve_index() -> AxumResponse {
-    match <Frontend as RustEmbed>::get("index.html") {
+    match Frontend::get("index.html") {
         Some(file) => Response::builder()
             .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(file.data.into_owned()))

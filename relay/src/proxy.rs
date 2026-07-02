@@ -11,7 +11,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use rust_embed::RustEmbed;
+use rust_embed::Embed;
 use axum::{
     body::Body,
     extract::{
@@ -73,7 +73,7 @@ fn try_serve_static(path: &str) -> Option<axum::response::Response<Body>> {
 
     // Serve exact file matches only (no SPA fallback for unknown paths —
     // those go through the proxy).
-    match <super::Frontend as RustEmbed>::get(clean) {
+    match super::Frontend::get(clean) {
         Some(file) => {
             let mime = mime_guess::from_path(clean).first_or_octet_stream();
             Some(
