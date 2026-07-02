@@ -30,6 +30,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: relay -> target
+          cache-on-failure: false
 
       - name: Install musl cross-compiler
         run: |

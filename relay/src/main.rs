@@ -33,7 +33,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use rust_embed::Embed;
+use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::broadcast;

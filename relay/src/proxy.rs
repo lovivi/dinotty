@@ -11,7 +11,7 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use rust_embed::Embed;
+use rust_embed::RustEmbed;
 use axum::{
     body::Body,
     extract::{
