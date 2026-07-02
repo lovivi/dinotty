@@ -489,7 +489,7 @@ async fn static_handler(req: Request<Body>) -> AxumResponse {
     if path.is_empty() {
         return serve_index();
     }
-    match Frontend::get(path) {
+    match <Frontend as RustEmbed>::get(path) {
         Some(file) => {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
             Response::builder()
@@ -502,7 +502,7 @@ async fn static_handler(req: Request<Body>) -> AxumResponse {
 }
 
 fn serve_index() -> AxumResponse {
-    match Frontend::get("index.html") {
+    match <Frontend as RustEmbed>::get("index.html") {
         Some(file) => Response::builder()
             .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(file.data.into_owned()))

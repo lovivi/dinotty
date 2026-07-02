@@ -73,7 +73,7 @@ fn try_serve_static(path: &str) -> Option<axum::response::Response<Body>> {
 
     // Serve exact file matches only (no SPA fallback for unknown paths —
     // those go through the proxy).
-    match super::Frontend::get(clean) {
+    match <super::Frontend as RustEmbed>::get(clean) {
         Some(file) => {
             let mime = mime_guess::from_path(clean).first_or_octet_stream();
             Some(
