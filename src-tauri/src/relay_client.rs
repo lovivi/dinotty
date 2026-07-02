@@ -4,12 +4,11 @@
 //! to the embedded dinotty-server's PTY.
 
 use dinotty_server::session::SessionManager;
-use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use tokio_tungstenite::tungstenite;
 use tracing::{info, warn};
 
