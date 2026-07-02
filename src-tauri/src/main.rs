@@ -167,33 +167,55 @@ fn pty_detach(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<
 }
 
 // ── Relay client (remote access) ──────────────────────────────
-// These commands are called by the RemoteTab in settings. In v0 they
-// persist the config and log the intent; the actual outbound WS is
-// started separately (dinotty-server --relay-outbound). A future
-// version will integrate it into the Tauri process directly.
+// Called by the RemoteTab in settings. Spawns a background task
+// that keeps an outbound WS connection to the cloud relay alive,
+// forwarding input frames to the embedded dinotty server's PTY.
+// A global store holds the JoinHandle so `relay_disconnect` can
+// cancel it.
+mod relay_client;
+
+use std::sync::OnceLock;
+use tokio::sync::Mutex;
+
+static RELAY_HANDLE: OnceLock<Mutex<Option<tokio::task::JoinHandle<()>>>> = OnceLock::new();
 
 #[tauri::command]
-fn relay_connect(url: String, password: String) -> Result<(), String> {
-    tracing::info!(%url, "relay_connect called — save config");
-    // Persist the config so the desktop app can pick it up on next
-    // launch or when the background task runs.
-    if let Some(home) = dirs::home_dir() {
-        let dir = home.join(".dinotty");
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(
-            dir.join("relay-config.json"),
-            serde_json::json!({ "url": url, "password": password }).to_string(),
-        );
-        tracing::info!("relay config saved to {:?}", dir.join("relay-config.json"));
-    }
-    // TODO: spawn outbound WS task in-process
+async fn relay_connect(
+    url: String,
+    password: String,
+    state: State<'_, Arc<SessionManager>>,
+) -> Result<(), String> {
+    let desktop_id = if let Some(home) = dirs::home_dir() {
+        let p = home.join(".dinotty").join("relay-desktop-id");
+        if let Ok(id) = std::fs::read_to_string(&p) {
+            id.trim().to_string()
+        } else {
+            let id = uuid::Uuid::new_v4().to_string();
+            let _ = std::fs::create_dir_all(p.parent().unwrap());
+            let _ = std::fs::write(&p, &id);
+            id
+        }
+    } else {
+        uuid::Uuid::new_v4().to_string()
+    };
+
+    let manager = state.inner().clone();
+    let handle = relay_client::spawn_relay(manager, url, password, desktop_id.clone()).await;
+
+    let lock = RELAY_HANDLE.get_or_init(|| Mutex::new(None));
+    *lock.lock().await = Some(handle);
+
     Ok(())
 }
 
 #[tauri::command]
-fn relay_disconnect() -> Result<(), String> {
-    tracing::info!("relay_disconnect called");
-    // TODO: cancel outbound WS task
+async fn relay_disconnect() -> Result<(), String> {
+    if let Some(lock) = RELAY_HANDLE.get() {
+        if let Some(handle) = lock.lock().await.take() {
+            info!("relay_disconnect — aborting outbound task");
+            handle.abort();
+        }
+    }
     Ok(())
 }
 
