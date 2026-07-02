@@ -5,15 +5,16 @@
 #   or:   wget -qO- ... | sudo bash -s -- <password>
 #
 # What it does:
-#   1. Downloads the latest `dinotty-relay` binary (or builds from source
-#      if no prebuilt release matches the current arch).
+#   1. Downloads the latest `dinotty-relay` tarball from GitHub releases
+#      (the only source — no fallback to local build, so cargo is not
+#      required on the server).
 #   2. Generates a self-signed TLS cert (works on phones; user clicks
 #      through the warning once).
 #   3. Writes a systemd unit so the relay restarts on crash.
 #   4. Detects the public IP and prints the line the user pastes into
 #      `local-connect.sh` on the desktop.
 #
-# Requirements: systemd, openssl, curl or wget, sudo. Tested on Ubuntu 22.04.
+# Requirements: systemd, openssl, curl. Tested on Ubuntu 22.04.
 
 set -euo pipefail
 
@@ -45,37 +46,29 @@ case "$ARCH" in
 esac
 
 # ---- Download prebuilt binary ----
-# The release URL pattern is /<owner>/<repo>/releases/download/relay-v<ver>/dinotty-relay-<arch>.tar.xz
-# When the repo doesn't have a release yet, this 404s and we fall through
-# to building from source.
+# Only uses a prebuilt tarball from GitHub releases. No build-from-source
+# fallback — keeps the script lightweight (no cargo / rustup needed on
+# the server). Make sure the `dinotty-relay-v*` release exists.
 REPO="${DINOTTY_REPO:-lovivi/dinotty}"
 VER="${DINOTTY_VER:-latest}"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VER}/dinotty-relay-${RELAY_ARCH}.tar.xz"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
-echo ">> Attempting to download prebuilt relay..."
-if curl -fsSL --connect-timeout 10 -o "$TMPDIR/relay.tar.xz" "$DOWNLOAD_URL" 2>/dev/null; then
-    echo ">> Downloaded. Extracting..."
-    tar -xJf "$TMPDIR/relay.tar.xz" -C "$TMPDIR"
-    install -m 0755 "$TMPDIR/dinotty-relay" "$INSTALL_DIR/"
-else
-    echo ">> No prebuilt binary; building from source."
-    if ! command -v cargo >/dev/null 2>&1; then
-        echo "cargo not found — install rustup first:" >&2
-        echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
-        exit 1
-    fi
-    # Build only the relay crate. Assumes this script is run from a
-    # clone of the repo.
-    if [ ! -d "relay" ]; then
-        echo "relay/ subdir not found. Run this script from the repo root," >&2
-        echo "or set DINOTTY_REPO to a fork that has a relay release." >&2
-        exit 1
-    fi
-    (cd relay && cargo build --release)
-    install -m 0755 target/release/dinotty-relay "$INSTALL_DIR/"
+echo ">> Downloading prebuilt relay from ${REPO} (${VER}, ${RELAY_ARCH})..."
+if ! curl -fSL --connect-timeout 10 -o "$TMPDIR/relay.tar.xz" "$DOWNLOAD_URL" 2>/dev/null; then
+    echo "" >&2
+    echo "!! Failed to download prebuilt relay binary." >&2
+    echo "   URL: $DOWNLOAD_URL" >&2
+    echo "   Make sure a release named 'relay-<ver>' exists on $REPO" >&2
+    echo "   (see https://github.com/$REPO/releases) and that the asset" >&2
+    echo "   'dinotty-relay-${RELAY_ARCH}.tar.xz' is attached." >&2
+    echo "   Or set DINOTTY_VER to a release tag that exists." >&2
+    exit 1
 fi
+tar -xJf "$TMPDIR/relay.tar.xz" -C "$TMPDIR"
+install -m 0755 "$TMPDIR/dinotty-relay" "$INSTALL_DIR/"
+echo ">> Installed dinotty-relay to $INSTALL_DIR"
 
 # ---- Generate self-signed TLS cert if no real one provided ----
 CERT_PATH="$TLS_DIR/cert.pem"
