@@ -1,8 +1,8 @@
 name: Build relay release
 
-# Builds the relay binary for both musl targets and attaches them
-# as release assets on a tag named `relay-<version>`. server-install.sh
-# pulls these from the latest such release.
+# Builds the relay binary for x86_64-unknown-linux-musl (the most
+# common VPS arch) and attaches it as a release asset. server-install.sh
+# pulls this from the latest such release.
 
 on:
   workflow_dispatch:
@@ -18,55 +18,43 @@ env:
 
 jobs:
   build-relay:
-    name: Build musl binaries
+    name: Build musl x86_64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+          targets: x86_64-unknown-linux-musl
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: relay -> target
 
+      - name: Install musl cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
       - name: Build x86_64
         working-directory: relay
         run: cargo build --release --target x86_64-unknown-linux-musl
 
-      - name: Build aarch64
-        working-directory: relay
-        run: cargo build --release --target aarch64-unknown-linux-musl
-
-      - name: Package tarballs
+      - name: Package tarball
         run: |
           set -e
           REPO_DIR="$GITHUB_WORKSPACE"
           ART_DIR="$REPO_DIR/relay-artifacts"
           rm -rf "$ART_DIR"
           mkdir -p "$ART_DIR"
-          for triple in x86_64-unknown-linux-musl:relay-amd64 aarch64-unknown-linux-musl:relay-arm64; do
-            triple="${triple%:*}"
-            arch_dir="${triple##*:}"
-            tar -cJf "$ART_DIR/dinotty-relay-$triple.tar.xz" \
-              -C "$REPO_DIR/relay/target/$triple/release" \
-              "dinotty-relay"
-            # strip arch_dir, keep just the file
-            mv "$ART_DIR/dinotty-relay-$triple.tar.xz" "$ART_DIR/dinotty-relay-$arch_dir.tar.xz"
-            echo "  packaged $ART_DIR/dinotty-relay-$arch_dir.tar.xz"
-          done
+          tar -cJf "$ART_DIR/dinotty-relay-amd64.tar.xz" \
+            -C "$REPO_DIR/relay/target/x86_64-unknown-linux-musl/release" \
+            "dinotty-relay"
           ls -lh "$ART_DIR"
 
       - name: Determine version
         id: ver
         run: |
-          # Allow workflow_dispatch override: dispatch inputs.version
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Otherwise infer from the most recent commit
           echo "version=relay-v0.12.1" >> "$GITHUB_OUTPUT"
 
       - name: Publish to GitHub Releases
@@ -77,6 +65,5 @@ jobs:
           generate_release_notes: false
           files: |
             relay-artifacts/dinotty-relay-amd64.tar.xz
-            relay-artifacts/dinotty-relay-arm64.tar.xz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
