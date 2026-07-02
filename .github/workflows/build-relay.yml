@@ -1,0 +1,82 @@
+name: Build relay release
+
+# Builds the relay binary for both musl targets and attaches them
+# as release assets on a tag named `relay-<version>`. server-install.sh
+# pulls these from the latest such release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/windows-shell-profiles]
+    paths:
+      - 'relay/**'
+      - 'relay/Cargo.lock'
+      - '.github/workflows/build-relay.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-relay:
+    name: Build musl binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: relay -> target
+
+      - name: Build x86_64
+        working-directory: relay
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      - name: Build aarch64
+        working-directory: relay
+        run: cargo build --release --target aarch64-unknown-linux-musl
+
+      - name: Package tarballs
+        run: |
+          set -e
+          REPO_DIR="$GITHUB_WORKSPACE"
+          ART_DIR="$REPO_DIR/relay-artifacts"
+          rm -rf "$ART_DIR"
+          mkdir -p "$ART_DIR"
+          for triple in x86_64-unknown-linux-musl:relay-amd64 aarch64-unknown-linux-musl:relay-arm64; do
+            triple="${triple%:*}"
+            arch_dir="${triple##*:}"
+            tar -cJf "$ART_DIR/dinotty-relay-$triple.tar.xz" \
+              -C "$REPO_DIR/relay/target/$triple/release" \
+              "dinotty-relay"
+            # strip arch_dir, keep just the file
+            mv "$ART_DIR/dinotty-relay-$triple.tar.xz" "$ART_DIR/dinotty-relay-$arch_dir.tar.xz"
+            echo "  packaged $ART_DIR/dinotty-relay-$arch_dir.tar.xz"
+          done
+          ls -lh "$ART_DIR"
+
+      - name: Determine version
+        id: ver
+        run: |
+          # Allow workflow_dispatch override: dispatch inputs.version
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Otherwise infer from the most recent commit
+          echo "version=relay-v0.12.1" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: ${{ steps.ver.outputs.version }}
+          generate_release_notes: false
+          files: |
+            relay-artifacts/dinotty-relay-amd64.tar.xz
+            relay-artifacts/dinotty-relay-arm64.tar.xz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
