@@ -11,7 +11,6 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use rust_embed::Embed;
 use axum::{
     body::Body,
     extract::{
@@ -61,31 +60,11 @@ fn is_ws_upgrade(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-/// Try to serve a file from the embedded frontend dist. Returns `None`
-/// when no static asset matches — the caller should then proxy the request.
-fn try_serve_static(path: &str) -> Option<axum::response::Response<Body>> {
-    let clean = path.trim_start_matches('/');
-
-    // Root → index.html
-    if clean.is_empty() {
-        return Some(super::serve_index());
-    }
-
-    // Serve exact file matches only (no SPA fallback for unknown paths —
-    // those go through the proxy).
-    match super::Frontend::get(clean) {
-        Some(file) => {
-            let mime = mime_guess::from_path(clean).first_or_octet_stream();
-            Some(
-                Response::builder()
-                    .header(header::CONTENT_TYPE, mime.as_ref())
-                    .body(Body::from(file.data.into_owned()))
-                    .unwrap()
-                    .into_response(),
-            )
-        }
-        None => None,
-    }
+/// Try to serve a file from the embedded frontend dist. The relay no
+/// longer embeds the frontend — everything goes through the HTTP proxy
+/// to the desktop. This always returns `None`.
+fn try_serve_static(_path: &str) -> Option<axum::response::Response<Body>> {
+    None
 }
 
 // ── Main catch-all fallback (HTTP + static) ─────────────────────────

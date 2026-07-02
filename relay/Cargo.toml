@@ -15,8 +15,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures-util = "0.3"
 dashmap = "5"
-rust-embed = { version = "8", features = ["axum"] }
-mime_guess = "2"
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["url", "connect"] }
 axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

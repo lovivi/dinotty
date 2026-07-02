@@ -33,18 +33,14 @@ use axum::{
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-/// Embedded frontend assets. In dev (no dist yet) the embed still
-/// compiles but `Frontend::get` returns `None` for everything; the
-/// relay still works for WS + register.
-#[derive(Embed)]
-#[folder = "../frontend/dist/"]
-struct Frontend;
+/// No embedded frontend. The relay no longer serves static files —
+/// all non-route traffic is proxied to the desktop via the outbound
+/// WS tunnel. This keeps the relay lightweight (no rust-embed dep).
 
 /// Per-desktop state. Two broadcast channels:
 ///   - `desktop_to_mobile`: every frame the desktop sends is fanned out
@@ -483,39 +479,6 @@ fn check_password(headers: &axum::http::HeaderMap, expected: &str) -> bool {
 /// handles both static files and HTTP proxying. Kept for reference /
 /// test use.
 #[allow(dead_code)]
-async fn static_handler(req: Request<Body>) -> AxumResponse {
-    let path = req.uri().path();
-    let path = path.trim_start_matches('/');
-    if path.is_empty() {
-        return serve_index();
-    }
-    match Frontend::get(path) {
-        Some(file) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            Response::builder()
-                .header(header::CONTENT_TYPE, mime.as_ref())
-                .body(Body::from(file.data.into_owned()))
-                .unwrap()
-        }
-        None => serve_index(),
-    }
-}
-
-fn serve_index() -> AxumResponse {
-    match Frontend::get("index.html") {
-        Some(file) => Response::builder()
-            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Body::from(file.data.into_owned()))
-            .unwrap(),
-        None => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::from(
-                "frontend dist not embedded — run `pnpm build` in /frontend first",
-            ))
-            .unwrap(),
-    }
-}
-
 // suppress dead-code warning for `Duration` import which is used by axum's
 // internal timers; we keep it for future use.
 #[allow(dead_code)]
