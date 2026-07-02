@@ -3,7 +3,7 @@
 //! Keeps an outbound WS to the relay, forwarding input frames
 //! to the embedded dinotty-server's PTY.
 
-use crate::session::SessionManager;
+use dinotty_server::session::SessionManager;
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;

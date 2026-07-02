@@ -6,7 +6,7 @@ use dinotty_server::restore_state;
 use dinotty_server::session::{SessionManager, SessionStatus, SyncMsg};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 mod embedded_server;
@@ -174,10 +174,10 @@ fn pty_detach(pane_id: String, state: State<'_, Arc<SessionManager>>) -> Result<
 // cancel it.
 mod relay_client;
 
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
+use std::sync::Arc;
 
-static RELAY_HANDLE: OnceLock<Mutex<Option<tokio::task::JoinHandle<()>>>> = OnceLock::new();
+static RELAY_HANDLE: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>> =
+    std::sync::Mutex::new(None);
 
 #[tauri::command]
 async fn relay_connect(
@@ -202,17 +202,18 @@ async fn relay_connect(
     let manager = state.inner().clone();
     let handle = relay_client::spawn_relay(manager, url, password, desktop_id.clone()).await;
 
-    let lock = RELAY_HANDLE.get_or_init(|| Mutex::new(None));
-    *lock.lock().await = Some(handle);
+    if let Ok(mut guard) = RELAY_HANDLE.lock() {
+        *guard = Some(handle);
+    }
 
     Ok(())
 }
 
 #[tauri::command]
 async fn relay_disconnect() -> Result<(), String> {
-    if let Some(lock) = RELAY_HANDLE.get() {
-        if let Some(handle) = lock.lock().await.take() {
-            info!("relay_disconnect — aborting outbound task");
+    if let Ok(mut guard) = RELAY_HANDLE.lock() {
+        if let Some(handle) = guard.take() {
+            tracing::info!("relay_disconnect — aborting outbound task");
             handle.abort();
         }
     }
