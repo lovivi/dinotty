@@ -237,8 +237,10 @@ async fn handle_sync_socket(socket: WebSocket, manager: Arc<SessionManager>) {
                             // Remove stale pane_id from any parent tab layouts
                             manager.purge_pane_from_layouts(&pane_id);
                             restore_state::save_state(&manager);
-                            manager
-                                .broadcast_sync_others(&SyncMsg::TabClosed { tab_id: pane_id }, &client_id);
+                            manager.broadcast_sync_others(
+                                &SyncMsg::TabClosed { tab_id: pane_id },
+                                &client_id,
+                            );
                         }
                         SyncClientMsg::ClosePane { pane_id } => {
                             manager.kill_and_remove(&pane_id);

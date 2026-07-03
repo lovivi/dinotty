@@ -12,11 +12,11 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::Arc;
 use sysinfo::{Disks, Networks, System};
 use tokio::process::Command;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use tokio::sync::{broadcast, Mutex};
 use tokio::time::{interval, Duration};
 use tracing::{debug, warn};
@@ -303,10 +303,7 @@ async fn collect_gpu() -> Option<Vec<GpuData>> {
         ]);
     #[cfg(windows)]
     nvidia_cmd.creation_flags(0x08000000);
-    let output = match nvidia_cmd
-        .output()
-        .await
-    {
+    let output = match nvidia_cmd.output().await {
         Ok(o) => o,
         Err(e) => {
             warn!("Failed to spawn nvidia-smi: {e}");

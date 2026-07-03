@@ -1,9 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use axum::{response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -39,7 +39,8 @@ pub struct ShellProfilesResponse {
 #[allow(clippy::unused_async)]
 pub async fn list_profiles() -> impl IntoResponse {
     let profiles = builtin_profiles();
-    let default_profile_id = profiles.iter().find(|profile| profile.is_default).map(|p| p.id.clone());
+    let default_profile_id =
+        profiles.iter().find(|profile| profile.is_default).map(|p| p.id.clone());
     Json(ShellProfilesResponse { profiles, default_profile_id })
 }
 
@@ -67,11 +68,8 @@ pub fn find_profile(profile_id: Option<&str>) -> Option<ShellProfile> {
 
 fn unix_profiles() -> Vec<ShellProfile> {
     let shell = crate::pty::get_shell();
-    let name = Path::new(&shell)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Shell")
-        .to_string();
+    let name =
+        Path::new(&shell).file_name().and_then(|name| name.to_str()).unwrap_or("Shell").to_string();
     vec![ShellProfile {
         id: "unix-default".into(),
         name,
@@ -150,10 +148,7 @@ fn command_exists(command: &str) -> bool {
     cmd.arg(command);
     #[cfg(windows)]
     cmd.creation_flags(0x08000000);
-    cmd
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    cmd.output().map(|output| output.status.success()).unwrap_or(false)
 }
 
 #[cfg(test)]

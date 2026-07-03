@@ -12,9 +12,9 @@ use axum::{
 use rust_embed::Embed;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 use dinotty_server::auth;

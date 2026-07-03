@@ -1,11 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use axum::{http::StatusCode, response::IntoResponse, Json};
 use crate::pty::{self, CreateSessionOptions};
 use crate::session::{self, SessionManager};
 use crate::settings::{self, RestoreConfig};
 use crate::shell_profiles;
+use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tracing::{debug, warn};
 
 const STATE_VERSION: u32 = 1;
@@ -73,7 +77,8 @@ pub async fn get_restore_state() -> impl IntoResponse {
 pub async fn delete_restore_state() -> impl IntoResponse {
     match clear_state() {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+            .into_response(),
     }
 }
 
@@ -100,7 +105,10 @@ pub fn save_state(manager: &SessionManager) {
     }
 }
 
-fn save_state_inner(manager: &SessionManager, restore_config: &RestoreConfig) -> Result<(), String> {
+fn save_state_inner(
+    manager: &SessionManager,
+    restore_config: &RestoreConfig,
+) -> Result<(), String> {
     let state = snapshot(manager, restore_config);
     let path = state_path();
     let dir = path.parent().ok_or_else(|| "invalid state path".to_string())?;
@@ -139,18 +147,12 @@ pub fn snapshot(manager: &SessionManager, restore_config: &RestoreConfig) -> Wor
         if leaf_ids.is_empty() {
             continue;
         }
-        let active_pane_id = tab_val
-            .get("active_pane_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let shell_profile_id = tab_val
-            .get("shell_profile_id")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let shell_profile_name = tab_val
-            .get("shell_profile_name")
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let active_pane_id =
+            tab_val.get("active_pane_id").and_then(|v| v.as_str()).map(String::from);
+        let shell_profile_id =
+            tab_val.get("shell_profile_id").and_then(|v| v.as_str()).map(String::from);
+        let shell_profile_name =
+            tab_val.get("shell_profile_name").and_then(|v| v.as_str()).map(String::from);
         let group_id = tab_val.get("group_id").and_then(|v| v.as_str()).map(String::from);
         let workspace_roots = tab_val
             .get("workspace_roots")
@@ -170,7 +172,8 @@ pub fn snapshot(manager: &SessionManager, restore_config: &RestoreConfig) -> Wor
 
         for pane_id in leaf_ids {
             let session = manager.sessions.get(&pane_id);
-            let cwd = session.as_ref().map(|s| s.cwd_state.lock().expect("mutex poisoned").cwd.clone());
+            let cwd =
+                session.as_ref().map(|s| s.cwd_state.lock().expect("mutex poisoned").cwd.clone());
             let output_tail = if restore_config.persist_output_tails {
                 session
                     .as_ref()
@@ -244,7 +247,11 @@ pub fn restore(manager: &Arc<SessionManager>) {
         match pty::create_session_with_options(
             manager,
             &pane.pane_id,
-            CreateSessionOptions { cwd: pane.cwd.clone(), shell_profile, ..CreateSessionOptions::default() },
+            CreateSessionOptions {
+                cwd: pane.cwd.clone(),
+                shell_profile,
+                ..CreateSessionOptions::default()
+            },
         ) {
             Ok((session, _)) => {
                 session

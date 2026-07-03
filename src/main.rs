@@ -18,27 +18,25 @@ use rust_embed::Embed;
 use std::fs;
 use std::net::SocketAddr;
 
-use std::sync::Arc;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use std::collections::HashMap;
 use std::sync::atomic;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use std::collections::HashMap;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 type StreamMap = Arc<
     Mutex<
         HashMap<
             String,
-            tokio::sync::mpsc::UnboundedSender<
-                tokio_tungstenite::tungstenite::Message,
-            >,
+            tokio::sync::mpsc::UnboundedSender<tokio_tungstenite::tungstenite::Message>,
         >,
     >,
 >;
 
 use tower_http::cors::CorsLayer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing::{info, warn};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::file_watcher::FileWatcherState;
 use crate::history::HistoryState;
@@ -302,12 +300,7 @@ struct Args {
 
 impl Default for Args {
     fn default() -> Self {
-        Self {
-            port: 8999,
-            relay_url: None,
-            relay_password: None,
-            relay_desktop_id: None,
-        }
+        Self { port: 8999, relay_url: None, relay_password: None, relay_desktop_id: None }
     }
 }
 
@@ -338,11 +331,7 @@ async fn run_relay_outbound(
             break;
         }
 
-        let ws_url = format!(
-            "{}/relay/desktop/ws/{}",
-            relay_url.trim_end_matches('/'),
-            desktop_id
-        );
+        let ws_url = format!("{}/relay/desktop/ws/{}", relay_url.trim_end_matches('/'), desktop_id);
         info!(%ws_url, "connecting to relay");
 
         let req = match tungstenite::handshake::client::Request::builder()
@@ -392,11 +381,7 @@ async fn run_relay_outbound(
         let mut ws = ws;
         let hello = serde_json::to_string(&serde_json::json!({"v": 1, "desktop_id": desktop_id}))
             .unwrap_or_default();
-        if ws
-            .send(tungstenite::Message::Text(hello))
-            .await
-            .is_err()
-        {
+        if ws.send(tungstenite::Message::Text(hello)).await.is_err() {
             warn!("relay hello send failed; reconnecting");
             sleep_or_shutdown(&shutdown, backoff).await;
             continue;
@@ -423,8 +408,7 @@ async fn run_relay_outbound(
             tokio::sync::mpsc::unbounded_channel::<tokio_tungstenite::tungstenite::Message>();
 
         // Shared map: stream_id → sender for local WS bridge tasks.
-        let streams: StreamMap =
-            Arc::new(Mutex::new(HashMap::new()));
+        let streams: StreamMap = Arc::new(Mutex::new(HashMap::new()));
 
         // Reader task — parses framed JSON messages from the relay.
         //
@@ -450,26 +434,20 @@ async fn run_relay_outbound(
                             _ => None,
                         };
                         if let Some(raw) = payload {
-                            if let Ok(val) =
-                                serde_json::from_str::<serde_json::Value>(raw)
-                            {
+                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(raw) {
                                 match val.get("type").and_then(|v| v.as_str()) {
                                     Some("input") => {
-                                        if let Some(data) =
-                                            val.get("data").and_then(|v| v.as_str())
+                                        if let Some(data) = val.get("data").and_then(|v| v.as_str())
                                         {
-                                            if let Ok(snap) = manager_for_reader
-                                                .active_pane_snapshot()
+                                            if let Ok(snap) =
+                                                manager_for_reader.active_pane_snapshot()
                                             {
                                                 let pane_id = snap.pane_id;
                                                 if let Some(entry) =
                                                     manager_for_reader.sessions.get(&pane_id)
                                                 {
-                                                    if let Ok(mut w) = entry.writer.lock()
-                                                    {
-                                                        let _ = w.write_all(
-                                                            data.as_bytes(),
-                                                        );
+                                                    if let Ok(mut w) = entry.writer.lock() {
+                                                        let _ = w.write_all(data.as_bytes());
                                                     }
                                                 }
                                             }
@@ -479,8 +457,7 @@ async fn run_relay_outbound(
                                         let tx = reader_res_tx.clone();
                                         let req_val = val.clone();
                                         tokio::spawn(async move {
-                                            http_req_proxy(req_val, tx, local_port)
-                                                .await;
+                                            http_req_proxy(req_val, tx, local_port).await;
                                         });
                                     }
                                     Some("ws_open") => {
@@ -497,10 +474,7 @@ async fn run_relay_outbound(
                                         let tx = reader_res_tx.clone();
                                         let strs = reader_streams.clone();
                                         tokio::spawn(async move {
-                                            ws_bridge_proxy(
-                                                sid, path, tx, strs, local_port,
-                                            )
-                                            .await;
+                                            ws_bridge_proxy(sid, path, tx, strs, local_port).await;
                                         });
                                     }
                                     Some("ws_data") => {
@@ -508,17 +482,13 @@ async fn run_relay_outbound(
                                             .get("stream_id")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("");
-                                        let data_b64 = val
-                                            .get("data")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("");
+                                        let data_b64 =
+                                            val.get("data").and_then(|v| v.as_str()).unwrap_or("");
                                         let binary = val
                                             .get("binary")
-                                            .and_then(|v| v.as_bool())
+                                            .and_then(serde_json::Value::as_bool)
                                             .unwrap_or(false);
-                                        let bytes = BASE64
-                                            .decode(data_b64)
-                                            .unwrap_or_default();
+                                        let bytes = BASE64.decode(data_b64).unwrap_or_default();
                                         let map = reader_streams.lock().unwrap();
                                         if let Some(tx) = map.get(sid) {
                                             let msg = if binary {
@@ -527,8 +497,7 @@ async fn run_relay_outbound(
                                                 )
                                             } else {
                                                 tokio_tungstenite::tungstenite::Message::Text(
-                                                    String::from_utf8_lossy(&bytes)
-                                                        .to_string(),
+                                                    String::from_utf8_lossy(&bytes).to_string(),
                                                 )
                                             };
                                             let _ = tx.send(msg);
@@ -553,10 +522,7 @@ async fn run_relay_outbound(
                                 }
                             }
                         }
-                        if matches!(
-                            m,
-                            tokio_tungstenite::tungstenite::Message::Close(_)
-                        ) {
+                        if matches!(m, tokio_tungstenite::tungstenite::Message::Close(_)) {
                             break;
                         }
                         let _ = &desktop_id_for_reader;
@@ -634,21 +600,16 @@ async fn http_req_proxy(
     res_tx: tokio::sync::mpsc::UnboundedSender<tokio_tungstenite::tungstenite::Message>,
     local_port: u16,
 ) {
-    let req_id = val
-        .get("req_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let req_id = val.get("req_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let method = val.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
     let path = val.get("path").and_then(|v| v.as_str()).unwrap_or("/");
     let body_b64 = val.get("body").and_then(|v| v.as_str()).unwrap_or("");
     let body_bytes = BASE64.decode(body_b64).unwrap_or_default();
 
-    let url = format!("http://127.0.0.1:{}{}", local_port, path);
+    let url = format!("http://127.0.0.1:{local_port}{path}");
 
     let client = reqwest::Client::new();
     let mut req_builder = match method {
-        "GET" => client.get(&url),
         "POST" => client.post(&url),
         "PUT" => client.put(&url),
         "DELETE" => client.delete(&url),
@@ -685,8 +646,10 @@ async fn http_req_proxy(
             let mut headers_json = serde_json::Map::new();
             for (name, value) in resp_headers.iter() {
                 if let Ok(v) = value.to_str() {
-                    headers_json
-                        .insert(name.as_str().to_string(), serde_json::Value::String(v.to_string()));
+                    headers_json.insert(
+                        name.as_str().to_string(),
+                        serde_json::Value::String(v.to_string()),
+                    );
                 }
             }
 
@@ -749,11 +712,8 @@ async fn ws_bridge_proxy(
     let sid = stream_id.clone();
     let res_tx_clone = res_tx.clone();
     let to_outbound = tokio::spawn(async move {
-        while let Some(msg) = local_rx.next().await {
-            let msg = match msg {
-                Ok(m) => m,
-                Err(_) => break,
-            };
+        while let Some(item) = local_rx.next().await {
+            let Ok(msg) = item else { break };
             let frame = match &msg {
                 tokio_tungstenite::tungstenite::Message::Text(t) => serde_json::json!({
                     "type": "ws_data",
@@ -774,10 +734,7 @@ async fn ws_bridge_proxy(
                 _ => continue,
             };
             let json = serde_json::to_string(&frame).unwrap_or_default();
-            if res_tx_clone
-                .send(tokio_tungstenite::tungstenite::Message::Text(json))
-                .is_err()
-            {
+            if res_tx_clone.send(tokio_tungstenite::tungstenite::Message::Text(json)).is_err() {
                 break;
             }
             if matches!(msg, tokio_tungstenite::tungstenite::Message::Close(_)) {
@@ -790,8 +747,7 @@ async fn ws_bridge_proxy(
             "stream_id": &sid,
         });
         if let Ok(json) = serde_json::to_string(&close_frame) {
-            let _ = res_tx_clone
-                .send(tokio_tungstenite::tungstenite::Message::Text(json));
+            let _ = res_tx_clone.send(tokio_tungstenite::tungstenite::Message::Text(json));
         }
     });
 
@@ -817,15 +773,9 @@ async fn ws_bridge_proxy(
 fn extract_host(url: &str) -> String {
     // Strip scheme:// and trailing path. Just the host:port for the Host
     // header.
-    let without_scheme = url
-        .strip_prefix("ws://")
-        .or_else(|| url.strip_prefix("wss://"))
-        .unwrap_or(url);
-    without_scheme
-        .split('/')
-        .next()
-        .unwrap_or(without_scheme)
-        .to_string()
+    let without_scheme =
+        url.strip_prefix("ws://").or_else(|| url.strip_prefix("wss://")).unwrap_or(url);
+    without_scheme.split('/').next().unwrap_or(without_scheme).to_string()
 }
 
 /// Build the underlying TCP / TLS stream the websocket rides on. For ws://
@@ -847,18 +797,14 @@ async fn ws_connect_stream(ws_url: String) -> Result<WsStream, WsErr> {
         )));
     };
     let host_port = rest.split('/').next().unwrap_or(&rest).to_string();
-    let (host, port) = host_port.rsplit_once(':').ok_or_else(|| {
-        WsErr::Io(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "missing port",
-        ))
-    })?;
-    let port: u16 = port.parse().map_err(|e| {
-        WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e))
-    })?;
-    let addr: SocketAddr = format!("{}:{}", host, port).parse().map_err(|e| {
-        WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e))
-    })?;
+    let (host, port) = host_port
+        .rsplit_once(':')
+        .ok_or_else(|| WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, "missing port")))?;
+    let port: u16 =
+        port.parse().map_err(|e| WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
+    let addr: SocketAddr = format!("{}:{}", host, port)
+        .parse()
+        .map_err(|e| WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
     let host = host.to_string();
     let tcp = TcpStream::connect(addr).await?;
     if scheme == "wss" {
@@ -869,14 +815,10 @@ async fn ws_connect_stream(ws_url: String) -> Result<WsStream, WsErr> {
         // rustls still works.
         let mut roots = RootCertStore::empty();
         roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let cfg = ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+        let cfg = ClientConfig::builder().with_root_certificates(roots).with_no_client_auth();
         let connector = TlsConnector::from(Arc::new(cfg));
-        let server_name =
-            rustls::pki_types::ServerName::try_from(host.clone()).map_err(|e| {
-                WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e))
-            })?;
+        let server_name = rustls::pki_types::ServerName::try_from(host.clone())
+            .map_err(|e| WsErr::Io(io::Error::new(io::ErrorKind::InvalidInput, e)))?;
         let tls = connector.connect(server_name, tcp).await?;
         Ok(WsStream::Tls(Box::new(tls)))
     } else {
@@ -935,10 +877,7 @@ impl tokio::io::AsyncWrite for WsStream {
 
 type WsErr = tokio_tungstenite::tungstenite::Error;
 
-async fn sleep_or_shutdown(
-    shutdown: &Arc<atomic::AtomicBool>,
-    dur: Duration,
-) {
+async fn sleep_or_shutdown(shutdown: &Arc<atomic::AtomicBool>, dur: Duration) {
     let start = std::time::Instant::now();
     while start.elapsed() < dur {
         if shutdown.load(atomic::Ordering::Relaxed) {
@@ -1057,9 +996,7 @@ async fn main() {
     //   Terminal 1: dinotty-server --port 8999
     //   Terminal 2: dinotty-server --port 8999 --relay-outbound <relay-url> <password>
     if let (Some(relay_url), Some(relay_password)) = (args.relay_url, args.relay_password) {
-        let desktop_id = args
-            .relay_desktop_id
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let desktop_id = args.relay_desktop_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let shutdown = Arc::new(atomic::AtomicBool::new(false));
 
         // Restore any prior tabs from disk so the screen snapshot has
@@ -1076,7 +1013,8 @@ async fn main() {
                 let _ = std::fs::write(&path, &desktop_id);
             }
         }
-        run_relay_outbound(relay_url, relay_password, desktop_id, manager, shutdown, args.port).await;
+        run_relay_outbound(relay_url, relay_password, desktop_id, manager, shutdown, args.port)
+            .await;
         return;
     }
 

@@ -5,9 +5,9 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::sync::Arc;
 
 use crate::session::SessionManager;
 
@@ -40,14 +40,10 @@ pub async fn workspace_git_status(
 ) -> impl IntoResponse {
     let root = try_res!(get_root(&manager, &q.pane_id));
     let mut git_cmd = std::process::Command::new("git");
-    git_cmd
-            .args(["status", "--porcelain"])
-            .current_dir(&root);
+    git_cmd.args(["status", "--porcelain"]).current_dir(&root);
     #[cfg(windows)]
     git_cmd.creation_flags(0x08000000);
-    let output = match tokio::task::spawn_blocking(move || git_cmd.output())
-    .await
-    {
+    let output = match tokio::task::spawn_blocking(move || git_cmd.output()).await {
         Ok(Ok(o)) if o.status.success() => o,
         _ => return Json(GitStatusResponse { is_git_repo: false, files: vec![] }).into_response(),
     };
@@ -106,9 +102,7 @@ pub async fn workspace_git_diff(
         let root = root.clone();
         move || {
             let mut git_cmd = std::process::Command::new("git");
-            git_cmd
-                .args(["rev-parse", "--git-dir"])
-                .current_dir(&root);
+            git_cmd.args(["rev-parse", "--git-dir"]).current_dir(&root);
             #[cfg(windows)]
             git_cmd.creation_flags(0x08000000);
             git_cmd.output()
@@ -128,9 +122,7 @@ pub async fn workspace_git_diff(
         let rel = rel.to_string();
         move || {
             let mut git_cmd = std::process::Command::new("git");
-            git_cmd
-                .args(["show", &format!("HEAD:{rel}")])
-                .current_dir(&root);
+            git_cmd.args(["show", &format!("HEAD:{rel}")]).current_dir(&root);
             #[cfg(windows)]
             git_cmd.creation_flags(0x08000000);
             git_cmd.output()
@@ -214,9 +206,7 @@ pub async fn workspace_git_stage_lines(
         let rel = rel.to_string();
         move || {
             let mut git_cmd = std::process::Command::new("git");
-            git_cmd
-                .args(["show", &format!("HEAD:{rel}")])
-                .current_dir(&root);
+            git_cmd.args(["show", &format!("HEAD:{rel}")]).current_dir(&root);
             #[cfg(windows)]
             git_cmd.creation_flags(0x08000000);
             git_cmd.output()
@@ -296,15 +286,13 @@ pub async fn workspace_git_stage_lines(
             .current_dir(&root);
         #[cfg(windows)]
         git_cmd.creation_flags(0x08000000);
-        git_cmd
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                if let Some(ref mut stdin) = child.stdin {
-                    stdin.write_all(patch.as_bytes())?;
-                }
-                child.wait()
-            })
+        git_cmd.spawn().and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin.write_all(patch.as_bytes())?;
+            }
+            child.wait()
+        })
     })
     .await;
     match result {

@@ -702,11 +702,7 @@ impl SessionManager {
         // 1. Resolve the active pane_id (a leaf) from the global
         //    active_pane_id cursor, falling back to "the only leaf in
         //    the only tab" if the cursor is unset.
-        let pane_id_opt = self
-            .active_pane_id
-            .lock()
-            .expect("mutex poisoned")
-            .clone();
+        let pane_id_opt = self.active_pane_id.lock().expect("mutex poisoned").clone();
         let pane_id = match pane_id_opt {
             Some(id) => id,
             None => {
@@ -731,10 +727,7 @@ impl SessionManager {
         };
 
         // 2. Read the (cols, rows) from the session's size field.
-        let session = self
-            .sessions
-            .get(&pane_id)
-            .ok_or("session not found for active pane")?;
+        let session = self.sessions.get(&pane_id).ok_or("session not found for active pane")?;
         let (cols, rows) = *session.size.lock().expect("mutex poisoned");
         Ok(ActivePaneSnapshot { pane_id, cols, rows })
     }

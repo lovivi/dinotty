@@ -236,10 +236,7 @@ impl HistoryState {
         drop(deleted);
         let now = now_unix();
         let mut entries = self.inner.entries.write().await;
-        let entry = entries.entry(cmd).or_insert(HistoryEntry {
-            frequency: 0,
-            last_used_at: now,
-        });
+        let entry = entries.entry(cmd).or_insert(HistoryEntry { frequency: 0, last_used_at: now });
         entry.frequency += 1;
         entry.last_used_at = now;
         drop(entries);
@@ -267,14 +264,17 @@ fn get_history_path(shell_type: &str) -> PathBuf {
     }
 }
 
-fn parse_history(shell_type: &str, content: &str, default_mtime: i64) -> HashMap<String, HistoryEntry> {
+fn parse_history(
+    shell_type: &str,
+    content: &str,
+    default_mtime: i64,
+) -> HashMap<String, HistoryEntry> {
     let mut entries = HashMap::new();
     let bump = |entries: &mut HashMap<String, HistoryEntry>, cmd: String| {
         if !cmd.is_empty() {
-            let entry = entries.entry(cmd).or_insert(HistoryEntry {
-                frequency: 0,
-                last_used_at: default_mtime,
-            });
+            let entry = entries
+                .entry(cmd)
+                .or_insert(HistoryEntry { frequency: 0, last_used_at: default_mtime });
             entry.frequency += 1;
         }
     };
@@ -369,14 +369,8 @@ mod tests {
         // Build entries manually so we can pin last_used_at.
         let mtime = 1_000;
         let mut entries: HashMap<String, HistoryEntry> = HashMap::new();
-        entries.insert(
-            "git status".into(),
-            HistoryEntry { frequency: 5, last_used_at: mtime },
-        );
-        entries.insert(
-            "git pull".into(),
-            HistoryEntry { frequency: 5, last_used_at: mtime + 100 },
-        );
+        entries.insert("git status".into(), HistoryEntry { frequency: 5, last_used_at: mtime });
+        entries.insert("git pull".into(), HistoryEntry { frequency: 5, last_used_at: mtime + 100 });
         // Simulate the sort key the way `query()` does.
         let mut list: Vec<_> = entries
             .iter()
@@ -400,14 +394,8 @@ mod tests {
     fn frequency_still_beats_recency() {
         // Even if `git status` is older, much higher frequency should win.
         let mut entries: HashMap<String, HistoryEntry> = HashMap::new();
-        entries.insert(
-            "git status".into(),
-            HistoryEntry { frequency: 100, last_used_at: 1_000 },
-        );
-        entries.insert(
-            "git pull".into(),
-            HistoryEntry { frequency: 5, last_used_at: 9_999 },
-        );
+        entries.insert("git status".into(), HistoryEntry { frequency: 100, last_used_at: 1_000 });
+        entries.insert("git pull".into(), HistoryEntry { frequency: 5, last_used_at: 9_999 });
         let mut list: Vec<_> = entries
             .iter()
             .map(|(cmd, e)| SuggestionItem {

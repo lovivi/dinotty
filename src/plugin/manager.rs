@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use crate::session::SessionManager;
 
-use super::helpers::{copy_dir_all, create_symlink_dir, extract_tar_gz, set_executable, validate_manifest};
+use super::helpers::{
+    copy_dir_all, create_symlink_dir, extract_tar_gz, set_executable, validate_manifest,
+};
 use super::types::{ManagedProcess, PluginInfo, PluginManifest, PluginStateValue};
 
 // ─── PluginManager ──────────────────────────────────────────────────────────

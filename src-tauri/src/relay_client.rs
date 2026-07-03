@@ -7,8 +7,8 @@ use dinotty_server::session::SessionManager;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::sync::Arc;
-use std::time::Duration;
 use std::sync::Mutex;
+use std::time::Duration;
 use tokio_tungstenite::tungstenite;
 use tracing::{info, warn};
 
@@ -38,11 +38,8 @@ pub async fn spawn_relay(
         let max_backoff = Duration::from_secs(30);
 
         loop {
-            let ws_url = format!(
-                "{}/relay/desktop/ws/{}",
-                relay_url.trim_end_matches('/'),
-                desktop_id
-            );
+            let ws_url =
+                format!("{}/relay/desktop/ws/{}", relay_url.trim_end_matches('/'), desktop_id);
 
             let (mut ws, err) = match connect_outbound(&ws_url, &password).await {
                 Ok(ws) => (ws, false),
@@ -107,9 +104,9 @@ pub async fn spawn_relay(
 async fn connect_outbound(
     ws_url: &str,
     password: &str,
-) -> WsResult<tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->> {
+) -> WsResult<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+> {
     use tokio_tungstenite::MaybeTlsStream;
     use tokio_tungstenite::WebSocketStream;
 
@@ -123,13 +120,12 @@ async fn connect_outbound(
     let (host, port_str) = host_port.rsplit_once(':').unwrap_or((host_port, "80"));
     let port: u16 = port_str.parse().unwrap_or(80);
 
-    let addr: std::net::SocketAddr = format!("{}:{}", host, port)
-        .parse()
-        .map_err(|_| tungstenite::Error::ConnectionClosed)?;
+    let addr: std::net::SocketAddr =
+        format!("{}:{}", host, port).parse().map_err(|_| tungstenite::Error::ConnectionClosed)?;
 
-    let tcp = tokio::net::TcpStream::connect(addr)
-        .await
-        .map_err(|e| tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e)))?;
+    let tcp = tokio::net::TcpStream::connect(addr).await.map_err(|e| {
+        tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))
+    })?;
 
     let stream: MaybeTlsStream<tokio::net::TcpStream> = if scheme == "wss" {
         // Skip TLS for now (relay uses self-signed; trust on first use).
@@ -151,13 +147,13 @@ async fn connect_outbound(
         .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
         .header("Sec-WebSocket-Version", "13")
         .body(())
-        .map_err(|e| tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, e)))?;
-
-    let (ws, _) = tokio_tungstenite::client_async(req, stream)
-        .await
         .map_err(|e| {
-            tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))
+            tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
         })?;
+
+    let (ws, _) = tokio_tungstenite::client_async(req, stream).await.map_err(|e| {
+        tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))
+    })?;
 
     Ok(ws)
 }

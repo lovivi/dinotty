@@ -97,8 +97,7 @@ fn check_python_syntax(content: &str) -> Vec<SyntaxDiagnostic> {
         .stderr(Stdio::piped());
     #[cfg(windows)]
     py_cmd.creation_flags(0x08000000);
-    let Ok(mut child) = py_cmd.spawn()
-    else {
+    let Ok(mut child) = py_cmd.spawn() else {
         return vec![];
     };
     if let Some(ref mut stdin) = child.stdin {
@@ -161,10 +160,7 @@ fn check_go_syntax(content: &str) -> Vec<SyntaxDiagnostic> {
         .stderr(Stdio::piped());
     #[cfg(windows)]
     go_cmd.creation_flags(0x08000000);
-    let Ok(output) = go_cmd
-        .spawn()
-        .and_then(std::process::Child::wait_with_output)
-    else {
+    let Ok(output) = go_cmd.spawn().and_then(std::process::Child::wait_with_output) else {
         return vec![];
     };
     if output.status.success() {

@@ -58,9 +58,8 @@ pub fn create_session_with_options(
 
     let profile = options.shell_profile.clone();
     let shell = profile.as_ref().map_or_else(get_shell, |p| p.command.clone());
-    let shell_type = profile
-        .as_ref()
-        .map_or_else(|| get_shell_type(&shell), get_shell_type_for_profile);
+    let shell_type =
+        profile.as_ref().map_or_else(|| get_shell_type(&shell), get_shell_type_for_profile);
     let mut cmd = CommandBuilder::new(&shell);
     if let Some(profile) = profile.as_ref() {
         let args: Vec<&str> = profile.args.iter().map(String::as_str).collect();

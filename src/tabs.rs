@@ -96,11 +96,7 @@ pub async fn create_tab(
     let (_session, _shell_type) = match pty::create_session_with_options(
         &manager,
         &pane_id,
-        CreateSessionOptions {
-            cwd,
-            shell_profile,
-            ..CreateSessionOptions::default()
-        },
+        CreateSessionOptions { cwd, shell_profile, ..CreateSessionOptions::default() },
     ) {
         Ok(x) => x,
         Err(e) => {
@@ -231,13 +227,9 @@ pub async fn split_pane(
     let source_cwd = source_session
         .as_ref()
         .and_then(|s| s.cwd_state.lock().ok().map(|state| state.cwd.clone()));
-    let shell_profile = shell_profiles::find_profile(
-        req.profile_id.as_deref().or_else(|| {
-            source_session
-                .as_ref()
-                .and_then(|session| session.shell_profile_id.as_deref())
-        }),
-    );
+    let shell_profile = shell_profiles::find_profile(req.profile_id.as_deref().or_else(|| {
+        source_session.as_ref().and_then(|session| session.shell_profile_id.as_deref())
+    }));
 
     // Create PTY for new pane
     let (_session, _shell_type) = match pty::create_session_with_options(
@@ -245,16 +237,13 @@ pub async fn split_pane(
         &new_pane_id,
         CreateSessionOptions { cwd: source_cwd, shell_profile, ..CreateSessionOptions::default() },
     ) {
-            Ok(x) => x,
-            Err(e) => {
-                tracing::error!("Failed to create PTY for split: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": e })),
-                )
-                    .into_response();
-            }
-        };
+        Ok(x) => x,
+        Err(e) => {
+            tracing::error!("Failed to create PTY for split: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e })))
+                .into_response();
+        }
+    };
 
     // Update layout tree
     let Some(new_layout) =
