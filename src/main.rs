@@ -326,7 +326,20 @@ async fn run_relay_outbound(
     let mut backoff = Duration::from_secs(1);
     let max_backoff = Duration::from_secs(60);
 
+    // Track ws_bridge_proxy handles so we can abort them on reconnect.
+    let bridge_handles: Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>> =
+        Arc::new(Mutex::new(Vec::new()));
+
     loop {
+        // Abort any orphaned bridge proxy tasks from the previous reconnect
+        // attempt before we create new ones.
+        {
+            let mut bh = bridge_handles.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            for h in bh.drain(..) {
+                h.abort();
+            }
+        }
+
         if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
             break;
         }
@@ -401,6 +414,7 @@ async fn run_relay_outbound(
         let desktop_id_for_screen = desktop_id.clone();
         let shutdown_for_screen = shutdown.clone();
         let desktop_id_for_log = desktop_id.clone();
+        let bridge_handles_for_reader = bridge_handles.clone();
 
         // Channel for reader → response forwarder (http_resp, ws_data,
         // ws_close frames).
@@ -439,10 +453,17 @@ async fn run_relay_outbound(
                                     Some("input") => {
                                         if let Some(data) = val.get("data").and_then(|v| v.as_str())
                                         {
-                                            if let Ok(snap) =
-                                                manager_for_reader.active_pane_snapshot()
-                                            {
-                                                let pane_id = snap.pane_id;
+                                            let pane_id: Option<String> = val
+                                                .get("pane_id")
+                                                .and_then(|v| v.as_str())
+                                                .map(ToString::to_string)
+                                                .or_else(|| {
+                                                    manager_for_reader
+                                                        .active_pane_snapshot()
+                                                        .ok()
+                                                        .map(|snap| snap.pane_id)
+                                                });
+                                            if let Some(pane_id) = pane_id {
                                                 if let Some(entry) =
                                                     manager_for_reader.sessions.get(&pane_id)
                                                 {
@@ -473,9 +494,13 @@ async fn run_relay_outbound(
                                             .to_string();
                                         let tx = reader_res_tx.clone();
                                         let strs = reader_streams.clone();
-                                        tokio::spawn(async move {
+                                        let bridge_handle = tokio::spawn(async move {
                                             ws_bridge_proxy(sid, path, tx, strs, local_port).await;
                                         });
+                                        bridge_handles_for_reader
+                                            .lock()
+                                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                            .push(bridge_handle);
                                     }
                                     Some("ws_data") => {
                                         let sid = val
@@ -489,7 +514,8 @@ async fn run_relay_outbound(
                                             .and_then(serde_json::Value::as_bool)
                                             .unwrap_or(false);
                                         let bytes = BASE64.decode(data_b64).unwrap_or_default();
-                                        let map = reader_streams.lock().unwrap();
+                                        let map =
+                                            reader_streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                                         if let Some(tx) = map.get(sid) {
                                             let msg = if binary {
                                                 tokio_tungstenite::tungstenite::Message::Binary(
@@ -509,7 +535,8 @@ async fn run_relay_outbound(
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        let mut map = reader_streams.lock().unwrap();
+                                        let mut map =
+                                            reader_streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                                         if let Some(tx) = map.remove(&sid) {
                                             let _ = tx.send(
                                                 tokio_tungstenite::tungstenite::Message::Close(
@@ -572,17 +599,27 @@ async fn run_relay_outbound(
             info!(desktop_id = %desktop_id_for_screen, "relay screen ticker ended");
         });
 
+        // Pin in-place so we can still access the JoinHandles after select.
+        tokio::pin!(reader);
+        tokio::pin!(screen);
+
         // Wait for either task to finish. Reader finishing = relay closed;
-        // screen finishing = something internal failed. Either way, exit
-        // the outer loop and reconnect.
+        // screen finishing = something internal failed. Either way, we
+        // reconnect after aborting the surviving task.
         tokio::select! {
-            _ = &mut Box::pin(reader) => {
+            _ = reader.as_mut() => {
                 info!("relay reader ended; reconnecting");
             }
-            _ = &mut Box::pin(screen) => {
+            _ = screen.as_mut() => {
                 warn!("relay screen ticker ended; reconnecting");
             }
         }
+
+        // Abort whichever task didn't finish (abort on a completed handle
+        // is a no-op). This prevents orphaned tasks from accumulating
+        // across reconnect iterations.
+        reader.abort();
+        screen.abort();
 
         info!("relay connection lost; will retry");
         sleep_or_shutdown(&shutdown, backoff).await;
@@ -706,7 +743,7 @@ async fn ws_bridge_proxy(
         tokio::sync::mpsc::unbounded_channel::<tokio_tungstenite::tungstenite::Message>();
 
     // Register sender so the reader can forward ws_data / ws_close.
-    streams.lock().unwrap().insert(stream_id.clone(), stream_tx);
+    streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(stream_id.clone(), stream_tx);
 
     // Task 1: local WS → outbound WS (via res_tx as ws_data / ws_close).
     let sid = stream_id.clone();
@@ -767,7 +804,7 @@ async fn ws_bridge_proxy(
     }
 
     // Cleanup: unregister the stream.
-    streams.lock().unwrap().remove(&stream_id);
+    streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&stream_id);
 }
 
 fn extract_host(url: &str) -> String {

@@ -37,8 +37,8 @@ mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$TLS_DIR"
 # ---- Detect arch ----
 ARCH="$(uname -m)"
 case "$ARCH" in
-    x86_64) RELAY_ARCH="x86_64-unknown-linux-musl" ;;
-    aarch64) RELAY_ARCH="aarch64-unknown-linux-musl" ;;
+    x86_64) RELAY_ARCH="amd64" ;;
+    aarch64) RELAY_ARCH="aarch64" ;;
     *)
         echo "Unsupported arch: $ARCH (this script handles x86_64 and aarch64)" >&2
         exit 1
@@ -50,7 +50,7 @@ esac
 # fallback — keeps the script lightweight (no cargo / rustup needed on
 # the server). Make sure the `dinotty-relay-v*` release exists.
 REPO="${DINOTTY_REPO:-lovivi/dinotty}"
-VER="${DINOTTY_VER:-latest}"
+VER="${DINOTTY_VER:-relay-v0.12.1}"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/${VER}/dinotty-relay-${RELAY_ARCH}.tar.xz"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT

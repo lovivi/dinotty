@@ -67,6 +67,15 @@ fn try_serve_static(_path: &str) -> Option<axum::response::Response<Body>> {
     None
 }
 
+/// Remove the `desktop_id` parameter from a query string.
+fn strip_desktop_id_from_query(query: &str) -> String {
+    query
+        .split('&')
+        .filter(|pair| !pair.starts_with("desktop_id="))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
 // ── Main catch-all fallback (HTTP + static) ─────────────────────────
 
 /// Fallback handler: serves embedded static assets for recognised file
@@ -108,7 +117,14 @@ pub async fn ws_proxy_handler(
     let query = uri.query().unwrap_or("");
     let path_with_qs = match query {
         "" => uri.path().to_string(),
-        qs => format!("{}?{}", uri.path(), qs),
+        qs => {
+            let cleaned = strip_desktop_id_from_query(qs);
+            if cleaned.is_empty() {
+                uri.path().to_string()
+            } else {
+                format!("{}?{}", uri.path(), cleaned)
+            }
+        }
     };
 
     let desktop_id = match resolve_desktop_id(&state.desktops, query) {
@@ -289,7 +305,18 @@ async fn http_proxy_handler(
     };
 
     let req_id = Uuid::new_v4().to_string();
-    let uri_str = parts.uri.to_string();
+    let query = parts.uri.query().unwrap_or("");
+    let path = parts.uri.path();
+    let uri_str = if query.is_empty() {
+        path.to_string()
+    } else {
+        let cleaned = strip_desktop_id_from_query(query);
+        if cleaned.is_empty() {
+            path.to_string()
+        } else {
+            format!("{}?{}", path, cleaned)
+        }
+    };
 
     // Serialise headers (skip hop-by-hop headers).
     let mut headers_json = serde_json::Map::new();

@@ -22,6 +22,11 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.TextView;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.view.Gravity;
+import android.graphics.Typeface;
 
 /**
  * Dinotty TWA launcher (v0, read-only).
@@ -40,6 +45,7 @@ public class MainActivity extends Activity {
     private static final String LOADING_URL = "file:///android_asset/loading.html";
     private static final String BLOCKED_SCHEME = "intent";
 
+    private FrameLayout root;
     private WebView webView;
     private String launchUrl;
     private boolean errorShown;
@@ -60,10 +66,22 @@ public class MainActivity extends Activity {
 
         // Single root view: a FrameLayout holding the WebView plus an
         // invisible overlay that becomes the error page when needed.
-        FrameLayout root = new FrameLayout(this);
+        root = new FrameLayout(this);
         root.setBackgroundColor(Color.parseColor("#0F172A"));
         setContentView(root);
 
+        setupWebView();
+
+        loadTarget();
+    }
+
+    private void loadTarget() {
+        String target = (launchUrl != null && !launchUrl.isEmpty()) ? launchUrl : LOADING_URL;
+        webView.loadUrl(target);
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void setupWebView() {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#0F172A"));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
@@ -74,8 +92,6 @@ public class MainActivity extends Activity {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
-        // Future-proofing: cookies are unused in v0 but TWAs typically need
-        // them once the auth flow lands.
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
         settings.setMediaPlaybackRequiresUserGesture(false);
@@ -86,20 +102,12 @@ public class MainActivity extends Activity {
         }
         CookieManagerBridge.apply(settings);
 
-        // Hide scrollbars visually but keep scroll behaviour.
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
         webView.setScrollBarStyle(View.SCROLLBARS_OUTSIDE_OVERLAY);
 
         webView.setWebViewClient(new DinottyWebViewClient());
         webView.setWebChromeClient(new WebChromeClient());
-
-        loadTarget();
-    }
-
-    private void loadTarget() {
-        String target = (launchUrl != null && !launchUrl.isEmpty()) ? launchUrl : LOADING_URL;
-        webView.loadUrl(target);
     }
 
     @Override
@@ -211,6 +219,130 @@ public class MainActivity extends Activity {
         return out.toString();
     }
 
+    /** Show a native error page using TextView/Button instead of WebView. */
+    private void showNativeErrorPage() {
+        if (errorShown) return;
+        errorShown = true;
+
+        // Remove the crashed WebView from the view hierarchy and destroy it.
+        if (webView != null) {
+            root.removeView(webView);
+            webView.destroy();
+            webView = null;
+        }
+
+        int px16 = dpToPx(16);
+        int px32 = dpToPx(32);
+
+        // Full-screen error container
+        LinearLayout errorPage = new LinearLayout(this);
+        errorPage.setLayoutParams(new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        errorPage.setOrientation(LinearLayout.VERTICAL);
+        errorPage.setGravity(Gravity.CENTER_HORIZONTAL);
+        errorPage.setBackgroundColor(Color.parseColor("#0F172A"));
+        errorPage.setPadding(px32, 0, px32, 0);
+        errorPage.setTag("error_page");
+
+        // Top spacer pushes content toward vertical center
+        View topSpacer = new View(this);
+        topSpacer.setLayoutParams(new LinearLayout.LayoutParams(0, 0, 1));
+        errorPage.addView(topSpacer);
+
+        // Warning icon
+        TextView iconView = new TextView(this);
+        iconView.setText("⚠");
+        iconView.setTextSize(72);
+        iconView.setTextColor(Color.parseColor("#7C3AED"));
+        iconView.setGravity(Gravity.CENTER);
+        errorPage.addView(iconView);
+
+        // Title
+        TextView titleView = new TextView(this);
+        titleView.setText(R.string.connection_lost);
+        titleView.setTextSize(22);
+        titleView.setTextColor(Color.parseColor("#E2E8F0"));
+        titleView.setGravity(Gravity.CENTER);
+        titleView.setTypeface(null, Typeface.BOLD);
+        errorPage.addView(titleView);
+
+        // Subtitle
+        TextView subtitleView = new TextView(this);
+        subtitleView.setText(R.string.connection_offline);
+        subtitleView.setTextSize(14);
+        subtitleView.setTextColor(Color.parseColor("#94A3B8"));
+        subtitleView.setGravity(Gravity.CENTER);
+        subtitleView.setMaxWidth(dpToPx(300));
+        errorPage.addView(subtitleView);
+
+        // Spacer between subtitle and buttons
+        View midSpacer = new View(this);
+        midSpacer.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, px32));
+        errorPage.addView(midSpacer);
+
+        // Retry button
+        Button retryBtn = new Button(this);
+        retryBtn.setText(R.string.action_retry);
+        retryBtn.setTextSize(15);
+        retryBtn.setTextColor(Color.WHITE);
+        retryBtn.setAllCaps(false);
+        retryBtn.setGravity(Gravity.CENTER);
+        retryBtn.setBackgroundColor(Color.parseColor("#7C3AED"));
+        retryBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                recreateWebView();
+            }
+        });
+        errorPage.addView(retryBtn);
+
+        // Spacer between buttons
+        View btnSpacer = new View(this);
+        btnSpacer.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, px16));
+        errorPage.addView(btnSpacer);
+
+        // Close button
+        Button closeBtn = new Button(this);
+        closeBtn.setText(R.string.action_close);
+        closeBtn.setTextSize(15);
+        closeBtn.setTextColor(Color.parseColor("#E2E8F0"));
+        closeBtn.setAllCaps(false);
+        closeBtn.setGravity(Gravity.CENTER);
+        closeBtn.setBackgroundColor(Color.parseColor("#1E293B"));
+        closeBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                finish();
+            }
+        });
+        errorPage.addView(closeBtn);
+
+        // Bottom spacer (same weight as top for centering)
+        View bottomSpacer = new View(this);
+        bottomSpacer.setLayoutParams(new LinearLayout.LayoutParams(0, 0, 1));
+        errorPage.addView(bottomSpacer);
+
+        root.addView(errorPage);
+    }
+
+    /** Replace the native error page with a fresh WebView and load the target URL. */
+    private void recreateWebView() {
+        View errorPage = root.findViewWithTag("error_page");
+        if (errorPage != null) {
+            root.removeView(errorPage);
+        }
+        errorShown = false;
+        setupWebView();
+        loadTarget();
+    }
+
+    private int dpToPx(int dp) {
+        return Math.round(dp * getResources().getDisplayMetrics().density);
+    }
+
     private final class DinottyWebViewClient extends WebViewClient {
 
         @Override
@@ -253,13 +385,9 @@ public class MainActivity extends Activity {
 
         @Override
         public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
-            // The renderer crashed (often OOM). Tear down and surface the
-            // error page so the user can retry cleanly.
-            if (webView != null) {
-                webView.destroy();
-            }
-            webView = null;
-            showErrorPage();
+            // The renderer crashed (often OOM). Use a native error page
+            // because the WebView renderer is no longer functional.
+            showNativeErrorPage();
             return true;
         }
 

@@ -34,6 +34,7 @@ use axum::{
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -403,10 +404,25 @@ async fn handle_mobile_ws(
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // desktop → mobile: read from dtm_rx, write to ws_tx.
+    // Skip proxy protocol control frames (ws_data, ws_close, ws_open, http_req, http_resp)
+    // so the mobile only receives terminal data.
     let desktop_to_mobile = tokio::spawn(async move {
         loop {
             match dtm_rx.recv().await {
                 Ok(frame) => {
+                    // Check for proxy control frames (JSON with a "type" field)
+                    if let Ok(s) = String::from_utf8(frame.clone()) {
+                        if let Ok(val) = serde_json::from_str::<Value>(&s) {
+                            if let Some(ty) = val.get("type").and_then(|v| v.as_str()) {
+                                match ty {
+                                    "ws_data" | "ws_close" | "ws_open"
+                                    | "http_req" | "http_resp" => continue,
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
                     let kind = if frame.iter().any(|b| *b >= 0x80) {
                         Message::Binary(frame)
                     } else {

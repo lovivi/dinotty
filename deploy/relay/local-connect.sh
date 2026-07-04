@@ -83,6 +83,9 @@ SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/${SERVICE_NAME}.service"
 mkdir -p "$SERVICE_DIR"
 
+# Discover the actual binary path (prefer PATH, fall back to cargo)
+DINOTTY_BIN="$(command -v dinotty-server || echo "${DINOTTY_HOME}/.cargo/bin/dinotty-server")"
+
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Dinotty relay client (outbound to ${RELAY_HOST})
@@ -91,7 +94,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${DINOTTY_HOME}/.cargo/bin/dinotty-server --relay-outbound ${RELAY_URL} ${PASSWORD} --relay-desktop-id ${DESKTOP_ID} \${DINOTTY_TOKEN}
+ExecStart=${DINOTTY_BIN} --relay-outbound ${RELAY_URL} ${PASSWORD} --relay-desktop-id ${DESKTOP_ID} \${DINOTTY_TOKEN}
 Restart=always
 RestartSec=5
 
@@ -99,10 +102,10 @@ RestartSec=5
 WantedBy=default.target
 EOF
 
-# Check if dinotty-server is on PATH; warn if not
-if ! command -v dinotty-server >/dev/null 2>&1 && [ ! -x "${DINOTTY_HOME}/.cargo/bin/dinotty-server" ]; then
-    echo "!! dinotty-server not on PATH. Edit the ExecStart line above to point"
-    echo "   to your binary before starting the service."
+# Warn if binary still can't be found
+if [ ! -x "$DINOTTY_BIN" ]; then
+    echo "!! dinotty-server not found. The unit file is at $SERVICE_FILE."
+    echo "   Edit its ExecStart line to point to your binary before starting the service."
 fi
 
 systemctl --user daemon-reload 2>/dev/null || true
