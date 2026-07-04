@@ -67,11 +67,11 @@ fn try_serve_static(_path: &str) -> Option<axum::response::Response<Body>> {
     None
 }
 
-/// Remove the `desktop_id` parameter from a query string.
-fn strip_desktop_id_from_query(query: &str) -> String {
+/// Remove the `desktop_id` and `token` parameters from a query string.
+fn strip_internal_params_from_query(query: &str) -> String {
     query
         .split('&')
-        .filter(|pair| !pair.starts_with("desktop_id="))
+        .filter(|pair| !pair.starts_with("desktop_id=") && !pair.starts_with("token="))
         .collect::<Vec<_>>()
         .join("&")
 }
@@ -85,6 +85,11 @@ pub async fn proxy_fallback(
     State(state): State<super::AppState>,
     req: Request<Body>,
 ) -> axum::response::Response<Body> {
+    // 0. Check password
+    if !super::check_password(req.headers(), &state.password) {
+        return (StatusCode::UNAUTHORIZED, "wrong password").into_response();
+    }
+
     let path = req.uri().path();
 
     // 1. Serve static files directly
@@ -112,13 +117,18 @@ pub async fn proxy_fallback(
 pub async fn ws_proxy_handler(
     ws: WebSocketUpgrade,
     State(state): State<super::AppState>,
+    headers: HeaderMap,
     uri: Uri,
 ) -> axum::response::Response<Body> {
+    if !super::check_password(&headers, &state.password) {
+        return (StatusCode::UNAUTHORIZED, "wrong password").into_response();
+    }
+
     let query = uri.query().unwrap_or("");
     let path_with_qs = match query {
         "" => uri.path().to_string(),
         qs => {
-            let cleaned = strip_desktop_id_from_query(qs);
+            let cleaned = strip_internal_params_from_query(qs);
             if cleaned.is_empty() {
                 uri.path().to_string()
             } else {
@@ -310,7 +320,7 @@ async fn http_proxy_handler(
     let uri_str = if query.is_empty() {
         path.to_string()
     } else {
-        let cleaned = strip_desktop_id_from_query(query);
+        let cleaned = strip_internal_params_from_query(query);
         if cleaned.is_empty() {
             path.to_string()
         } else {

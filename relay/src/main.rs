@@ -467,7 +467,7 @@ async fn handle_mobile_ws(
 }
 
 /// Constant-time-ish password check.
-fn check_password(headers: &axum::http::HeaderMap, expected: &str) -> bool {
+pub fn check_password(headers: &axum::http::HeaderMap, expected: &str) -> bool {
     let provided = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())

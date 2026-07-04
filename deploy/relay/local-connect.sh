@@ -21,6 +21,15 @@
 
 set -euo pipefail
 
+# WSL check — systemd user services are not available under WSL.
+if grep -qi microsoft /proc/version 2>/dev/null; then
+    echo "!! WSL detected: systemd user services are not available."
+    echo "   Run the relay client manually:"
+    echo "     nohup dinotty-server --relay-outbound <RELAY_URL> <PASSWORD> --relay-desktop-id <DESKTOP_ID> &"
+    echo "   Or enable systemd in WSL: https://learn.microsoft.com/en-us/windows/wsl/enterprise#systemd"
+    exit 1
+fi
+
 RELAY_URL="${1:?usage: $0 '<relay-line-from-server-install>' '<password>'}"
 PASSWORD="${2:?usage: $0 '<relay-line-from-server-install>' '<password>'}"
 
