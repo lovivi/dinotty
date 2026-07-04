@@ -103,12 +103,17 @@ pub fn create_session_with_options(
                 }
             }
             "bash" => {
+                // Lightweight PROMPT_COMMAND: set window title + sync history.
+                // We deliberately do NOT inject VS Code shell integration
+                // sequences (\033]133;...) because they interfere with tools
+                // like Claude Code (cursor flickering, IME instability).
+                // History sync is batched (append-only, no reload) to avoid
+                // the disk I/O cost on every prompt — pasting into WSL is
+                // already slow enough.
                 cmd.env(
                     "PROMPT_COMMAND",
-                    r#"history -a; history -r; printf "\033]0;%s@%s:%s\007" "${USER}" "${HOSTNAME%%.*}" "${PWD/#$HOME/~}"; printf "\033]133;A\033\\"; printf "\033]133;D;%d\033\\" $?""#,
+                    r#"history -a; printf "\033]0;%s@%s:%s\007" "${USER}" "${HOSTNAME%%.*}" "${PWD/#$HOME/~}""#,
                 );
-                // Inject preexec-like trap for command start detection
-                cmd.env("BASH_ENV", r#"trap 'printf "\033]133;B\033\\"' DEBUG"#);
             }
             _ => {}
         }
@@ -265,13 +270,10 @@ setopt INC_APPEND_HISTORY SHARE_HISTORY
 
 function _dinotty_precmd {{
   printf "\033]0;%s@%s:%s\007" "${{USER}}" "${{HOST%%.*}}" "${{PWD/#$HOME/~}}"
-  printf "\033]133;A\033\\"
-  printf "\033]133;D;%d\033\\" $?
 }}
 
 function _dinotty_preexec {{
   printf "\033]0;%s\007" "$1"
-  printf "\033]133;B\033\\"
 }}
 
 if [[ -z "${{precmd_functions[(r)_dinotty_precmd]}}" ]]; then
