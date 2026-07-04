@@ -52,9 +52,12 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
       - name: Build Tauri bundle
         working-directory: src-tauri
-        run: cargo tauri build --target universal-apple-darwin
+        run: cargo tauri build
 
       - name: Upload .app bundle
         uses: actions/upload-artifact@v4
