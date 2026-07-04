@@ -53,6 +53,19 @@ export function useAutocomplete() {
    *  up to 20; the dropdown caps at this so it never covers half the screen. */
   const DROPDOWN_MAX = 8
 
+  /** Extract user input from a terminal line, stripping the shell prompt
+   *  (which typically ends with "$ ", "# " or "% ") from the start. */
+  function extractPrefix(text: string, cursorX: number): string {
+    const beforeCursor = cursorX >= text.length ? text : text.substring(0, cursorX)
+    const promptEnd = Math.max(
+      beforeCursor.lastIndexOf('$ '),
+      beforeCursor.lastIndexOf('# '),
+      beforeCursor.lastIndexOf('% '),
+    )
+    const start = promptEnd >= 0 ? promptEnd + 2 : 0
+    return beforeCursor.substring(start).trim()
+  }
+
   /** Exposed for tests; production code reads this off the terminal instance. */
   let onBeforeSendHook: ((data: string) => boolean) | null = null
 
@@ -156,7 +169,7 @@ export function useAutocomplete() {
     }
 
     const text = line.translateToString()
-    const prefix = text.substring(0, cursorX).trim()
+    const prefix = extractPrefix(text, cursorX)
 
     if (prefix.length < 1) {
       visible.value = false
@@ -172,6 +185,20 @@ export function useAutocomplete() {
 
     if (fetchTimer) clearTimeout(fetchTimer)
     fetchTimer = setTimeout(() => runFetch(prefix), 50)
+  }
+
+  /** Extract user input prefix, stripping the shell prompt from the line. */
+  function _extractPrefix(text: string, cursorX: number): string {
+    const beforeCursor = cursorX >= text.length ? text : text.substring(0, cursorX)
+    // Shell prompts typically end with "$ ", "# " (bash/sh) or "% " (zsh).
+    // Strip everything before the LAST occurrence of these markers.
+    const promptEnd = Math.max(
+      beforeCursor.lastIndexOf('$ '),
+      beforeCursor.lastIndexOf('# '),
+      beforeCursor.lastIndexOf('% '),
+    )
+    const start = promptEnd >= 0 ? promptEnd + 2 : 0
+    return beforeCursor.substring(start).trim()
   }
 
   function runFetch(prefix: string) {
