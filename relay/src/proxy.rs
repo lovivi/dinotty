@@ -106,7 +106,10 @@ pub async fn ws_proxy_handler(
     uri: Uri,
 ) -> axum::response::Response<Body> {
     let query = uri.query().unwrap_or("");
-    let path = uri.path().to_string();
+    let path_with_qs = match query {
+        "" => uri.path().to_string(),
+        qs => format!("{}?{}", uri.path(), qs),
+    };
 
     let desktop_id = match resolve_desktop_id(&state.desktops, query) {
         Some(id) => id,
@@ -131,8 +134,8 @@ pub async fn ws_proxy_handler(
     let did = desktop_id.clone();
 
     ws.on_upgrade(move |socket| async move {
-        info!(desktop_id = %did, path = %path, "ws proxy upgraded");
-        ws_proxy_task(socket, dtm_rx, mtd_tx, did, path).await;
+        info!(desktop_id = %did, path = %path_with_qs, "ws proxy upgraded");
+        ws_proxy_task(socket, dtm_rx, mtd_tx, did, path_with_qs).await;
     })
     .into_response()
 }
