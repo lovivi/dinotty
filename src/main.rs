@@ -514,8 +514,9 @@ async fn run_relay_outbound(
                                             .and_then(serde_json::Value::as_bool)
                                             .unwrap_or(false);
                                         let bytes = BASE64.decode(data_b64).unwrap_or_default();
-                                        let map =
-                                            reader_streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                                        let map = reader_streams
+                                            .lock()
+                                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                                         if let Some(tx) = map.get(sid) {
                                             let msg = if binary {
                                                 tokio_tungstenite::tungstenite::Message::Binary(
@@ -535,8 +536,9 @@ async fn run_relay_outbound(
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        let mut map =
-                                            reader_streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                                        let mut map = reader_streams
+                                            .lock()
+                                            .unwrap_or_else(std::sync::PoisonError::into_inner);
                                         if let Some(tx) = map.remove(&sid) {
                                             let _ = tx.send(
                                                 tokio_tungstenite::tungstenite::Message::Close(
@@ -743,7 +745,10 @@ async fn ws_bridge_proxy(
         tokio::sync::mpsc::unbounded_channel::<tokio_tungstenite::tungstenite::Message>();
 
     // Register sender so the reader can forward ws_data / ws_close.
-    streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(stream_id.clone(), stream_tx);
+    streams
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(stream_id.clone(), stream_tx);
 
     // Task 1: local WS → outbound WS (via res_tx as ws_data / ws_close).
     let sid = stream_id.clone();

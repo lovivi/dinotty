@@ -54,7 +54,7 @@ jobs:
 
       - name: Build Tauri bundle
         working-directory: src-tauri
-        run: cargo-tauri build --target universal-apple-darwin
+        run: cargo tauri build --target universal-apple-darwin
 
       - name: Upload .app bundle
         uses: actions/upload-artifact@v4
