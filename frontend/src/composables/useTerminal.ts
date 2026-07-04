@@ -76,13 +76,6 @@ export class TerminalInstance {
   private _clipboardKeysCleanup: (() => void) | null = null
   private _initialResizeTimer: ReturnType<typeof setInterval> | null = null
 
-  /** True when the runtime looks like macOS. Used to decide whether
-   *  bare Cmd+C means copy (mac) or should be ignored (everywhere else). */
-  private _isMac(): boolean {
-    if (typeof navigator === 'undefined') return false
-    return /Mac|iPhone|iPad/.test(navigator.platform)
-  }
-
   onTitleChange: ((title: string) => void) | null = null
   onShellInfo: ((shell: string) => void) | null = null
   onConnect: (() => void) | null = null
@@ -222,9 +215,6 @@ export class TerminalInstance {
     //   Ctrl+Shift+V       paste   (WSL / Win / gnome)
     //   Shift+Insert       paste   (legacy Linux / DOS)
     //   Cmd+V              paste   (macOS)
-    //
-    // We deliberately do NOT bind plain Ctrl+C / Ctrl+V (they must remain
-    // SIGINT / literal "V" so the shell can use them).
     if (textarea) {
       const copySelectionToClipboard = async () => {
         const sel = this.xterm?.getSelection()
@@ -255,29 +245,42 @@ export class TerminalInstance {
       }
 
       const onKeyDown = (e: KeyboardEvent) => {
-        // Only react to platform-correct modifier combos. Both Ctrl and
-        // Cmd are accepted on macOS (Ctrl is sometimes Cmd-bound via
-        // key remapping) but the user's intent is clear from the shift
-        // flag.
-        const isCopy =
-          (e.ctrlKey || e.metaKey) &&
-          e.shiftKey &&
-          (e.key === 'C' || e.key === 'c')
-        const isCopyPlain = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'c' && this._isMac()
+        const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
+        const hasSelection = (this.xterm?.getSelection() ?? '').length > 0
+
+        // Smart Ctrl+C: if there's a selection → copy; else pass through as SIGINT
+        if (!isMac && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+          if (hasSelection) {
+            e.preventDefault()
+            e.stopPropagation()
+            void copySelectionToClipboard()
+          }
+          return
+        }
+
+        // Ctrl+V on non-Mac: paste from clipboard (WSL / Windows Terminal convention)
+        if (!isMac && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+          e.preventDefault()
+          e.stopPropagation()
+          void pasteFromClipboard()
+          return
+        }
+
+        const isCopyShift =
+          (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c')
+        const isCopyPlain = isMac && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'C' || e.key === 'c')
         const isCopyInsert = (e.ctrlKey || e.metaKey) && e.key === 'Insert' && !e.shiftKey
-        const isPaste =
-          (e.ctrlKey || e.metaKey) &&
-          e.shiftKey &&
-          (e.key === 'V' || e.key === 'v')
-        const isPastePlain = (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'v' && this._isMac()
+        const isPasteShift =
+          (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'V' || e.key === 'v')
+        const isPastePlain = isMac && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'V' || e.key === 'v')
         const isPasteInsert = e.shiftKey && e.key === 'Insert'
-        if (isCopy || isCopyPlain || isCopyInsert) {
+        if (isCopyShift || isCopyPlain || isCopyInsert) {
           e.preventDefault()
           e.stopPropagation()
           void copySelectionToClipboard()
           return
         }
-        if (isPaste || isPastePlain || isPasteInsert) {
+        if (isPasteShift || isPastePlain || isPasteInsert) {
           e.preventDefault()
           e.stopPropagation()
           void pasteFromClipboard()
