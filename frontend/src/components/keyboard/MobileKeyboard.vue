@@ -565,8 +565,16 @@ async function onExpandHistory() {
   const { authFetch, apiUrl } = await import('../../composables/apiBase')
   try {
     const res = await authFetch(apiUrl('/api/history?limit=100'))
-    if (res.ok) allSuggestions.value = await res.json()
-  } catch {}
+    if (res.ok) {
+      allSuggestions.value = await res.json()
+    } else {
+      console.warn('[history] REST returned', res.status, '- falling back to WS data')
+      allSuggestions.value = suggestions.value
+    }
+  } catch (e) {
+    console.warn('[history] REST failed - falling back to WS data', e)
+    allSuggestions.value = suggestions.value
+  }
   showHistoryPanel.value = true
 }
 
