@@ -69,10 +69,13 @@ pub fn create_session_with_options(
     }
     cmd.env("TERM", "xterm-256color");
 
-    let home_path = std::env::var("HOME").map_or_else(
-        |_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-        PathBuf::from,
-    );
+    let home_path = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| {
+        let fallback = dirs::home_dir().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+        });
+        tracing::warn!("$HOME not set, falling back to {:?}", fallback);
+        fallback
+    });
 
     let effective_cwd = match options.cwd.as_ref() {
         Some(c) if c.is_dir() => c.clone(),
@@ -84,7 +87,7 @@ pub fn create_session_with_options(
             // spawn, otherwise a transient filesystem hiccup would break the
             // whole terminal session.
             tracing::warn!(
-                "Requested cwd {:?} is not a directory; falling back to {:?}",
+                "Requested cwd {:?} is not a directory (may be transient WSL 9P issue); falling back to {:?}",
                 c,
                 home_path
             );
@@ -199,6 +202,35 @@ pub fn create_session_with_options(
                         });
                     }
                     session_clone.on_pty_output(data);
+
+                    // Detect standalone BEL (0x07) characters — these are terminal
+                    // bell requests, not OSC string terminators (ESC ] ... BEL).
+                    // We skip 0x07 bytes that are preceded by ESC ] in the same
+                    // data chunk (OSC terminators used for window title, shell
+                    // integration, etc.).
+                    if data.contains(&0x07) {
+                        let mut i = 0;
+                        while i < data.len() {
+                            if data[i] == 0x07 {
+                                let is_osc = {
+                                    let mut j = i;
+                                    while j > 0 {
+                                        j -= 1;
+                                        if data[j] == 0x1b {
+                                            break;
+                                        }
+                                    }
+                                    data.get(j) == Some(&0x1b)
+                                        && data.get(j + 1) == Some(&b']')
+                                };
+                                if !is_osc {
+                                    manager_clone.on_bell_detected(&pane_id_clone);
+                                    break;
+                                }
+                            }
+                            i += 1;
+                        }
+                    }
 
                     utf8_tail.extend_from_slice(data);
                     let valid_up_to = match std::str::from_utf8(&utf8_tail) {

@@ -244,11 +244,15 @@ pub fn restore(manager: &Arc<SessionManager>) {
             continue;
         }
         let shell_profile = shell_profiles::find_profile(pane.shell_profile_id.as_deref());
+        let cwd = pane.cwd.as_ref().filter(|p| p.is_dir()).cloned();
+        if pane.cwd.is_some() && cwd.is_none() {
+            tracing::warn!("Restored cwd {:?} no longer exists, will use default", pane.cwd);
+        }
         match pty::create_session_with_options(
             manager,
             &pane.pane_id,
             CreateSessionOptions {
-                cwd: pane.cwd.clone(),
+                cwd,
                 shell_profile,
                 ..CreateSessionOptions::default()
             },

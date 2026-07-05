@@ -23,6 +23,13 @@ fn cwd_from_workspace_roots(roots: &[String]) -> Option<PathBuf> {
         if p.is_dir() {
             return Some(p);
         }
+        tracing::warn!("Workspace root {:?} does not exist on disk, skipping", root);
+    }
+    if !roots.is_empty() {
+        tracing::warn!(
+            "All {} workspace root(s) do not exist — falling back to default cwd",
+            roots.len()
+        );
     }
     None
 }

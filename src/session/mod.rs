@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::too_many_lines)]
 use crate::event_bus::EventBus;
+use crate::notification::NotificationBroadcast;
 use crate::vt_screen::VirtualScreen;
 use dashmap::DashMap;
 use portable_pty::{Child, MasterPty};
@@ -7,7 +8,7 @@ use serde::Serialize;
 use std::{
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
 use tokio::sync::mpsc;
@@ -428,6 +429,7 @@ pub struct SessionManager {
     pub tab_layouts: DashMap<String, serde_json::Value>,
     pub tab_order: Mutex<Vec<String>>,
     pub event_bus: EventBus,
+    pub notifier: OnceLock<Arc<NotificationBroadcast>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -521,6 +523,7 @@ impl SessionManager {
             tab_layouts: DashMap::new(),
             tab_order: Mutex::new(Vec::new()),
             event_bus: EventBus::new(),
+            notifier: OnceLock::new(),
         }
     }
 
@@ -625,6 +628,17 @@ impl SessionManager {
 
     pub fn broadcast_plugin_changed(&self, plugin_id: String, change: String) {
         self.broadcast_sync(&SyncMsg::PluginChanged { plugin_id, change });
+    }
+
+    /// Called when a BEL (0x07) character is detected in PTY output.
+    /// Forwards to the notification broadcast if configured.
+    ///
+    /// # Panics
+    /// Panics if the internal mutex is poisoned.
+    pub fn on_bell_detected(&self, pane_id: &str) {
+        if let Some(notifier) = self.notifier.get() {
+            notifier.send_bell(pane_id);
+        }
     }
 
     /// Remove a session from the `DashMap` and explicitly kill its child process.

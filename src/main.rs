@@ -1071,6 +1071,7 @@ async fn main() {
     let notifier = Arc::new(NotificationBroadcast::new());
     let settings_state = settings::create_settings_state();
     notifier.set_settings(settings_state.clone());
+    manager.notifier.set(notifier.clone()).ok();
     let history_state = HistoryState::new();
 
     // Load token from dedicated file or env var; empty means first-time setup

@@ -5,6 +5,13 @@ import { isTauri } from './useTransport'
 import { settings } from './useSettings'
 import { useI18n } from './useI18n'
 
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+  ])
+}
+
 // ── Sound ──────────────────────────────────────────────
 
 export interface SoundConfig {
@@ -220,8 +227,16 @@ function connectWs() {
   const connect = async () => {
     let url: string
     if (isTauri()) {
-      const origin = await getApiBase()
-      url = `${origin.replace(/^http/, 'ws')}/ws/notify`
+      try {
+        const origin = await withTimeout(getApiBase(), 5000)
+        url = `${origin.replace(/^http/, 'ws')}/ws/notify`
+      } catch (err) {
+        console.warn('Notification WebSocket: timed out connecting to embedded server, will retry', err)
+        ws = null
+        setTimeout(connect, reconnectDelay)
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000)
+        return
+      }
     } else {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
       url = `${proto}//${location.host}/ws/notify`
@@ -240,7 +255,9 @@ function connectWs() {
       setTimeout(connect, reconnectDelay)
       reconnectDelay = Math.min(reconnectDelay * 2, 30000)
     }
-    ws.onerror = () => {}
+    ws.onerror = (e) => {
+      console.error('Notification WebSocket error:', e)
+    }
   }
   connect()
 }

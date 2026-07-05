@@ -683,7 +683,10 @@ export class TerminalInstance {
     const heightChanged = rows !== this._lastRows
     this._lastCols = cols
     this._lastRows = rows
-    if (heightChanged && !this.isMouseModeEnabled()) {
+    if (force && heightChanged && !this.isMouseModeEnabled()) {
+      // Only scroll to bottom on explicit force (initial connect, visibility
+      // change) — NOT on every layout reflow, which would interrupt the user
+      // while they are reading history in an adjacent resized pane.
       this.xterm.scrollToBottom()
     }
     const resizeMsg: ClientMsg = { type: 'resize', cols, rows }
@@ -876,11 +879,24 @@ export class TerminalInstance {
       viewport.addEventListener('touchstart', onTouchStart, { passive: true })
       viewport.addEventListener('touchmove', onTouchMove, { passive: false })
       viewport.addEventListener('touchend', onTouchEnd, { passive: true })
+
+      // Mouse wheel scroll: intercept before xterm's internal handler so we
+      // get consistent scroll behavior across WebGL and DOM renderers.
+      // The isTrusted check prevents infinite loops: _sendWheelEvent dispatches
+      // a synthetic WheelEvent in mouse-tracking mode, and we must not catch it.
+      const onWheel = (e: WheelEvent) => {
+        if (!e.isTrusted) return
+        e.preventDefault()
+        this._sendWheelEvent(viewport, e.deltaY, e.clientX, e.clientY)
+      }
+      viewport.addEventListener('wheel', onWheel, { passive: false })
+
       this._touchCleanup = () => {
         clearMomentum()
         viewport.removeEventListener('touchstart', onTouchStart)
         viewport.removeEventListener('touchmove', onTouchMove)
         viewport.removeEventListener('touchend', onTouchEnd)
+        viewport.removeEventListener('wheel', onWheel)
       }
     }
 

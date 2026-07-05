@@ -290,6 +290,7 @@ pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
     let notifier = Arc::new(NotificationBroadcast::new());
     let settings_state = settings::create_settings_state();
     notifier.set_settings(settings_state.clone());
+    manager.notifier.set(notifier.clone()).ok();
     let history_state = HistoryState::new();
     let plugins = Arc::new(PluginManager::new());
     plugins.scan();
