@@ -17,7 +17,9 @@ use std::os::windows::process::CommandExt;
 use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
+use dinotty_server::agent;
 use dinotty_server::auth;
+use dinotty_server::audit;
 use dinotty_server::file_watcher::{self, FileWatcherState};
 use dinotty_server::history;
 use dinotty_server::history::HistoryState;
@@ -31,6 +33,7 @@ use dinotty_server::session::SessionManager;
 use dinotty_server::settings;
 use dinotty_server::shell_profiles;
 use dinotty_server::tabs;
+use dinotty_server::token;
 use dinotty_server::workspace;
 use dinotty_server::ws;
 
@@ -57,6 +60,7 @@ pub struct AppState {
     pub port: u16,
     pub git_info: GitInfo,
     pub qr_codes: Arc<qr_code::QrCodeState>,
+    pub agent: agent::AgentState,
 }
 
 impl axum::extract::FromRef<AppState> for Arc<SessionManager> {
@@ -110,6 +114,18 @@ impl axum::extract::FromRef<AppState> for (PluginManagerState, Arc<SessionManage
 impl axum::extract::FromRef<AppState> for Arc<qr_code::QrCodeState> {
     fn from_ref(state: &AppState) -> Self {
         state.qr_codes.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for agent::AgentState {
+    fn from_ref(state: &AppState) -> Self {
+        state.agent.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for token::TokenState {
+    fn from_ref(state: &AppState) -> Self {
+        state.agent.tokens.clone()
     }
 }
 
@@ -308,6 +324,21 @@ pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
     let qr_codes = Arc::new(qr_code::QrCodeState::new());
     qr_codes.clone().start_cleanup_task();
 
+    // Agent state (reuses the existing auth_token for agent token validation)
+    let tokens = Arc::new(token::TokenManager::new(auth_token.clone()));
+    let audit_logger = Arc::new(audit::AuditLogger::new());
+    let agent_state = agent::AgentState {
+        manager: manager.clone(),
+        settings: settings_state.clone(),
+        tokens: tokens.clone(),
+        audit: audit_logger,
+        run_limiter: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+    };
+    let agent_auth_state = token::AgentAuthState {
+        global_token: auth_token.clone(),
+        tokens: tokens.clone(),
+    };
+
     let state = AppState {
         manager: manager.clone(),
         settings: settings_state,
@@ -320,6 +351,7 @@ pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
         port,
         git_info,
         qr_codes,
+        agent: agent_state,
     };
 
     state.plugins.watch_changes(manager);
@@ -401,6 +433,18 @@ pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
         )
         .route("/api/plugins/:id/*path", get(plugin::plugin_asset))
         .route("/api/proxy", any(proxy::external_proxy_handler))
+        // Agent API routes — protected by agent token middleware
+        .merge(
+            Router::new()
+                .route("/api/agent/run", post(agent::agent_run))
+                .route("/api/agent/send", post(agent::agent_send))
+                .route("/api/agent/read", get(agent::agent_read))
+                .route("/ws/agent", get(agent::agent_ws_handler))
+                .layer(middleware::from_fn_with_state(
+                    agent_auth_state,
+                    token::agent_token_middleware,
+                )),
+        )
         .route("/preview/:port", any(proxy::proxy_handler_root))
         .route("/preview/:port/", any(proxy::proxy_handler_root))
         .route("/preview/:port/*path", any(proxy::proxy_handler_wildcard))

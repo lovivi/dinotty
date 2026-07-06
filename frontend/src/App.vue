@@ -58,6 +58,15 @@
           <Settings :size="16" />
         </button>
         <button
+          type="button"
+          class="tab-bar-icon-btn"
+          :title="t('agent.title')"
+          @click="agentOpen = true"
+          @touchend.prevent="agentOpen = true"
+        >
+          <Bot :size="16" />
+        </button>
+        <button
           v-if="notif.notifications.value.length > 0"
           type="button"
           class="tab-bar-icon-btn notif-btn"
@@ -159,6 +168,7 @@
     <CommandPalette ref="paletteRef" :commands="paletteCommands" />
 
     <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" />
+    <AgentPanel :open="agentOpen" @close="agentOpen = false" />
 
     <ConfirmCloseDialog @confirm="onConfirmClose" />
 
@@ -221,6 +231,7 @@ import type { Command } from './components/command/CommandPalette.vue'
 import MobileKeyboard from './components/keyboard/MobileKeyboard.vue'
 import KbToggleButton from './components/keyboard/KbToggleButton.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import AgentPanel from './components/agent/AgentPanel.vue'
 import ConfirmCloseDialog from './components/ui/ConfirmCloseDialog.vue'
 import ConfirmModal from './components/ui/ConfirmModal.vue'
 import PreviewPanel from './components/preview/PreviewPanel.vue'
@@ -259,7 +270,7 @@ import {
   apiUpdateTabMeta,
 } from './composables/useTabApi'
 import type { ShellProfile, RestoredPane } from './composables/useTabApi'
-import { Settings, Bell, Monitor, Plus, X, Star, AppWindow, Radar } from 'lucide-vue-next'
+import { Settings, Bell, Monitor, Plus, X, Star, AppWindow, Radar, Bot } from 'lucide-vue-next'
 import TabOverview from './components/overview/TabOverview.vue'
 import type { TabCard } from './composables/useTabPreview'
 import { useTabPreview, refreshPluginPreview, invalidatePluginPreview } from './composables/useTabPreview'
@@ -364,6 +375,7 @@ const isLandscape = ref(window.innerWidth > window.innerHeight)
 
 // Mission Control
 const overviewOpen = ref(false)
+const agentOpen = ref(false)
 const overviewCards = ref<TabCard[]>([])
 const currentTabIndex = computed(() =>
   filteredTabs.value.findIndex((t) => t.paneId === activePaneId.value) + 1
