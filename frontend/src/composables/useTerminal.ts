@@ -4,7 +4,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { SearchAddon } from '@xterm/addon-search'
 import type { ClientMsg, ServerMsg } from '../types/protocol'
-import { isTauri, createTransport, type Transport } from './useTransport'
+import { isTauri, createTransport, tauriInvoke, type Transport } from './useTransport'
 import { onThemeChange, settings, onTextChange } from './useSettings'
 import { wsUrlWithToken } from './apiBase'
 
@@ -219,17 +219,39 @@ export class TerminalInstance {
       const copySelectionToClipboard = async () => {
         const sel = this.xterm?.getSelection()
         if (!sel) return
+
+        // Primary path: modern Clipboard API (secure contexts)
         try {
           await navigator.clipboard.writeText(sel)
+          return
         } catch {
-          // Clipboard write can be denied on insecure origins or by policy.
-          // Fall back to the legacy textarea select-and-copy trick.
-          textarea.value = sel
-          textarea.select()
+          // Fall through to fallback
+        }
+
+        // Secondary path: deprecated execCommand with a detached textarea.
+        // Using a temp element avoids interfering with xterm.js internal state.
+        try {
+          const ta = document.createElement('textarea')
+          ta.value = sel
+          ta.style.position = 'fixed'
+          ta.style.opacity = '0'
+          ta.style.pointerEvents = 'none'
+          document.body.appendChild(ta)
+          ta.focus()
+          ta.select()
+          const ok = document.execCommand('copy')
+          ta.remove()
+          if (ok) return
+        } catch {
+          // execCommand may throw in some contexts
+        }
+
+        // Tertiary path: Tauri clipboard plugin via IPC invoke
+        if (isTauri()) {
           try {
-            document.execCommand('copy')
-          } finally {
-            textarea.value = ''
+            await tauriInvoke('plugin:clipboard-manager|write_text', { text: sel })
+          } catch {
+            // Clipboard plugin not available
           }
         }
       }
@@ -239,7 +261,16 @@ export class TerminalInstance {
         try {
           text = await navigator.clipboard.readText()
         } catch {
-          return
+          // clipboard.readText denied — try Tauri plugin
+          if (isTauri()) {
+            try {
+              text = (await tauriInvoke('plugin:clipboard-manager|read_text')) as string
+            } catch {
+              return
+            }
+          } else {
+            return
+          }
         }
         if (text) this.pasteText(text)
       }
@@ -248,12 +279,44 @@ export class TerminalInstance {
         const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
         const hasSelection = (this.xterm?.getSelection() ?? '').length > 0
 
-        // Smart Ctrl+C: if there's a selection → copy; else pass through as SIGINT
+        // Smart Ctrl+C: if there's a selection → copy; else pass through as SIGINT.
+        // On WebGL renderer, getSelection() may return empty at keydown before the
+        // SelectionManager has flushed — retry async before falling through.
         if (!isMac && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'C' || e.key === 'c')) {
           if (hasSelection) {
             e.preventDefault()
             e.stopPropagation()
             void copySelectionToClipboard()
+          } else {
+            e.preventDefault()
+            setTimeout(() => {
+              const retrySel = this.xterm?.getSelection() ?? ''
+              if (retrySel) {
+                void navigator.clipboard.writeText(retrySel)
+              } else {
+                this.sendData('\x03', true)
+              }
+            }, 0)
+          }
+          return
+        }
+
+        // Mac Ctrl+C (not Cmd+C): same smart behavior — copy or SIGINT
+        if (isMac && e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'C' || e.key === 'c')) {
+          if (hasSelection) {
+            e.preventDefault()
+            e.stopPropagation()
+            void copySelectionToClipboard()
+          } else {
+            e.preventDefault()
+            setTimeout(() => {
+              const retrySel = this.xterm?.getSelection() ?? ''
+              if (retrySel) {
+                void navigator.clipboard.writeText(retrySel)
+              } else {
+                this.sendData('\x03', true)
+              }
+            }, 0)
           }
           return
         }
@@ -268,7 +331,7 @@ export class TerminalInstance {
 
         const isCopyShift =
           (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c')
-        const isCopyPlain = isMac && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'C' || e.key === 'c')
+        const isCopyPlain = isMac && e.metaKey && !e.shiftKey && (e.key === 'C' || e.key === 'c')
         const isCopyInsert = (e.ctrlKey || e.metaKey) && e.key === 'Insert' && !e.shiftKey
         const isPasteShift =
           (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'V' || e.key === 'v')

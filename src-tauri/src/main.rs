@@ -374,6 +374,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(manager.clone())
         .setup(move |_app| {
             let mgr = Arc::clone(&manager);

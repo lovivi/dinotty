@@ -110,7 +110,7 @@ import {
 import { useSettings } from '../../composables/useSettings'
 import { useI18n } from '../../composables/useI18n'
 import { useKeybindings } from '../../composables/useKeybindings'
-import { copyToClipboard } from '../../utils/clipboard'
+import { copyToClipboard, pasteFromClipboard } from '../../utils/clipboard'
 import { randomId } from '../../utils/id'
 
 const props = defineProps<{
@@ -176,12 +176,8 @@ function onCopy() {
 }
 
 async function onPaste() {
-  try {
-    const text = await navigator.clipboard.readText()
-    if (text) emit('paste', text)
-  } catch {
-    // clipboard read may be denied
-  }
+  const text = await pasteFromClipboard()
+  if (text) emit('paste', text)
   close()
 }
 

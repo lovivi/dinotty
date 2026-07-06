@@ -62,6 +62,7 @@ import TerminalContextMenu from './TerminalContextMenu.vue'
 import SelectionHandles from './SelectionHandles.vue'
 import InlineAutocomplete from './InlineAutocomplete.vue'
 import { useAutocomplete } from '../../composables/useAutocomplete'
+import { copyToClipboard } from '../../utils/clipboard'
 
 const props = defineProps<{
   paneId: string
@@ -164,7 +165,9 @@ function closeMenu() {
 }
 
 function onMenuCopy() {
-  // copy already handled in TerminalContextMenu
+  const text = terminal?.getSelection() || linkTarget.value
+  if (!text) return
+  copyToClipboard(text)
 }
 
 async function onMenuPaste(text: string) {
