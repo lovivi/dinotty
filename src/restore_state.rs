@@ -251,11 +251,7 @@ pub fn restore(manager: &Arc<SessionManager>) {
         match pty::create_session_with_options(
             manager,
             &pane.pane_id,
-            CreateSessionOptions {
-                cwd,
-                shell_profile,
-                ..CreateSessionOptions::default()
-            },
+            CreateSessionOptions { cwd, shell_profile, ..CreateSessionOptions::default() },
         ) {
             Ok((session, _)) => {
                 session

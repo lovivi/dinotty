@@ -70,9 +70,8 @@ pub fn create_session_with_options(
     cmd.env("TERM", "xterm-256color");
 
     let home_path = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| {
-        let fallback = dirs::home_dir().unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
-        });
+        let fallback = dirs::home_dir()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
         tracing::warn!("$HOME not set, falling back to {:?}", fallback);
         fallback
     });
@@ -220,8 +219,7 @@ pub fn create_session_with_options(
                                             break;
                                         }
                                     }
-                                    data.get(j) == Some(&0x1b)
-                                        && data.get(j + 1) == Some(&b']')
+                                    data.get(j) == Some(&0x1b) && data.get(j + 1) == Some(&b']')
                                 };
                                 if !is_osc {
                                     manager_clone.on_bell_detected(&pane_id_clone);
