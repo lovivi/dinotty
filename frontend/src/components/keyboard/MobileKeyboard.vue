@@ -57,6 +57,32 @@
         <FileText :size="14" />
         <span class="mkb-path-label">{{ globalSelectedPath!.split('/').pop() }}</span>
       </button>
+      <span class="mkb-toolbar-spacer"></span>
+      <button
+        v-if="speechSupported"
+        class="mkb-tool-btn mkb-mic-btn"
+        :class="{ 'mkb-mic-recording': speechIsRecording, 'mkb-mic-processing': speechState === 'processing' }"
+        @mousedown.prevent="onMicClick"
+        :title="speechTooltip"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          :width="speechIsRecording ? 20 : 18"
+          :height="speechIsRecording ? 20 : 18"
+          class="mkb-mic-svg"
+        >
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+          <line x1="12" y1="19" x2="12" y2="23" />
+          <line x1="8" y1="23" x2="16" y2="23" />
+        </svg>
+        <span v-if="speechIsRecording" class="mkb-mic-dot"></span>
+      </button>
     </div>
 
     <!-- Swipeable panels container -->
@@ -231,6 +257,7 @@ import { useHistory } from '../../composables/useHistory'
 import { mapActionKeys } from '../../utils/actionKeyDef'
 import { Keyboard, SquareTerminal, FolderOpen, FileText } from 'lucide-vue-next'
 import { useSelectedPath } from '../../composables/useFileNavigation'
+import { useSpeechRecognition } from '../../composables/useSpeechRecognition'
 
 const props = defineProps<{
   visible: boolean
@@ -247,6 +274,63 @@ const { settings } = useSettings()
 const { t } = useI18n()
 const { suggestions, fetchSuggestions, fetchDebounced } = useHistory()
 const { selectedPath: globalSelectedPath } = useSelectedPath()
+
+// ── Speech recognition ──
+const sr = useSpeechRecognition()
+const {
+  state: speechState,
+  supported: speechSupported,
+} = sr
+const speechIsRecording = computed(() => speechState.value === 'recording' || speechState.value === 'processing')
+const speechTooltip = computed(() => {
+  if (speechState.value === 'unsupported') return '语音输入不支持（请使用 Chrome）'
+  if (speechState.value === 'recording') return '点击停止录音'
+  if (speechState.value === 'processing') return '识别中...'
+  if (speechState.value === 'error') return `语音错误: ${sr.error.value}`
+  return '语音输入'
+})
+const micProcessingTimeout = ref<ReturnType<typeof setTimeout> | null>(null)
+
+async function onMicClick() {
+  if (sr.state.value === 'recording') {
+    // 停止录音 → 获取识别结果
+    const text = await sr.stop()
+    if (text) {
+      insertText(text)
+    }
+    if (micProcessingTimeout.value) {
+      clearTimeout(micProcessingTimeout.value)
+      micProcessingTimeout.value = null
+    }
+  } else if (sr.state.value === 'processing') {
+    // 正在处理中，不做任何事
+    return
+  } else {
+    // 开始录音
+    sr.start(settings.locale === 'zh' ? 'zh-CN' : 'en-US')
+    // 安全机制：55s 后自动停止（Chrome 原生 60s 限制）
+    micProcessingTimeout.value = setTimeout(async () => {
+      if (sr.state.value === 'recording') {
+        const text = await sr.stop()
+        if (text) insertText(text)
+      }
+    }, 55000)
+  }
+}
+
+function insertText(text: string) {
+  const el = textInputRef.value
+  if (el) {
+    const start = el.selectionStart ?? textInput.value.length
+    textInput.value = textInput.value.slice(0, start) + text + textInput.value.slice(el.selectionEnd ?? start)
+    nextTick(() => {
+      el.selectionStart = el.selectionEnd = start + text.length
+      el.focus()
+    })
+  } else {
+    textInput.value += text
+  }
+}
 
 const showHistoryPanel = ref(false)
 const allSuggestions = ref<import('../../composables/useHistory').SuggestionItem[]>([])

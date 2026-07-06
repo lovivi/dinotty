@@ -282,19 +282,24 @@ export class TerminalInstance {
         // Smart Ctrl+C: if there's a selection → copy; else pass through as SIGINT.
         // On WebGL renderer, getSelection() may return empty at keydown before the
         // SelectionManager has flushed — retry async before falling through.
+        // We must NOT preventDefault in the no-selection path: xterm.js needs to
+        // process the keydown naturally to send ^C through its normal input chain
+        // (onData → onBeforeSend → onInput → transport), which is essential for
+        // compatibility with Claude Code / Codex TUI and other terminal apps that
+        // rely on the xterm.js input pipeline.
         if (!isMac && (e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'C' || e.key === 'c')) {
           if (hasSelection) {
             e.preventDefault()
             e.stopPropagation()
             void copySelectionToClipboard()
           } else {
-            e.preventDefault()
+            // Best-effort async retry: xterm will process the key normally
+            // and send ^C via its own onData chain. If selection appeared
+            // asynchronously (WebGL lag), we copy silently.
             setTimeout(() => {
               const retrySel = this.xterm?.getSelection() ?? ''
               if (retrySel) {
                 void navigator.clipboard.writeText(retrySel)
-              } else {
-                this.sendData('\x03', true)
               }
             }, 0)
           }
@@ -308,13 +313,10 @@ export class TerminalInstance {
             e.stopPropagation()
             void copySelectionToClipboard()
           } else {
-            e.preventDefault()
             setTimeout(() => {
               const retrySel = this.xterm?.getSelection() ?? ''
               if (retrySel) {
                 void navigator.clipboard.writeText(retrySel)
-              } else {
-                this.sendData('\x03', true)
               }
             }, 0)
           }

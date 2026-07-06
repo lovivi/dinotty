@@ -516,3 +516,42 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.mkb-toolbar-spacer {
+  flex: 1;
+}
+
+/* Mic button */
+.mkb-mic-btn {
+  position: relative;
+  transition: color 0.15s, background 0.15s;
+}
+.mkb-mic-btn:hover {
+  background: var(--bg-hover);
+}
+.mkb-mic-recording {
+  color: #e53935 !important;
+  background: rgba(229, 57, 53, 0.12) !important;
+}
+.mkb-mic-processing {
+  color: var(--fg-muted) !important;
+  opacity: 0.6;
+  pointer-events: none;
+}
+.mkb-mic-svg {
+  display: block;
+}
+.mkb-mic-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e53935;
+  animation: mkb-mic-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mkb-mic-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.2); }
+}
