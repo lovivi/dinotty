@@ -186,7 +186,7 @@ export const settings = reactive<SettingsData>({
     letter_spacing: 0,
     cursor_style: 'block',
     cursor_blink: true,
-    scrollback: 10000,
+    scrollback: 20000,
   },
   bookmarks: [],
   workspace_bookmarks: [],
