@@ -1472,12 +1472,20 @@ function onGlobalKeydown(e: KeyboardEvent) {
     }
   }
 
-  if (!e.shiftKey && e.key >= '1' && e.key <= '9') {
+  if (!e.shiftKey && !e.altKey && (e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
     const idx = parseInt(e.key) - 1
-    if (idx < filteredTabs.value.length) {
+    const groups = appSettings.project_groups.filter((g: any) => !g.archived)
+    if (idx < groups.length) {
       e.preventDefault()
-      activateTab(filteredTabs.value[idx].paneId)
+      const group = groups[idx]
+      const tab = tabs.value.find((t: any) => t.groupId === group.id)
+      if (tab) {
+        activateTab(tab.paneId)
+      } else {
+        newTab(undefined, group.id)
+      }
     }
+    return
   }
 }
 
