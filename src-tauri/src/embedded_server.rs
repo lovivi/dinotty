@@ -18,8 +18,8 @@ use std::sync::Arc;
 use tower_http::cors::CorsLayer;
 
 use dinotty_server::agent;
-use dinotty_server::auth;
 use dinotty_server::audit;
+use dinotty_server::auth;
 use dinotty_server::file_watcher::{self, FileWatcherState};
 use dinotty_server::history;
 use dinotty_server::history::HistoryState;
@@ -334,10 +334,8 @@ pub async fn run_server(port: u16, manager: Arc<SessionManager>) {
         audit: audit_logger,
         run_limiter: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
     };
-    let agent_auth_state = token::AgentAuthState {
-        global_token: auth_token.clone(),
-        tokens: tokens.clone(),
-    };
+    let agent_auth_state =
+        token::AgentAuthState { global_token: auth_token.clone(), tokens: tokens.clone() };
 
     let state = AppState {
         manager: manager.clone(),
