@@ -103,6 +103,21 @@
   background: var(--scrollbar-thumb-hover);
 }
 
+/* Xterm viewport scrollbar: wider thumb for easier grabbing */
+.xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.xterm-viewport::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.xterm-viewport {
+  scrollbar-width: auto;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
 html,
 body,
 #app {
