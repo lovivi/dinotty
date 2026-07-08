@@ -237,18 +237,15 @@ pub async fn split_pane(
     // Fallback: if the source session's tracked CWD is unavailable (e.g. title
     // OSC hasn't fired yet on WSL), try the tab's workspace_roots.
     let cwd = source_cwd.or_else(|| {
-        tab_val
-            .get("workspace_roots")
-            .and_then(|v| v.as_array())
-            .and_then(|roots| {
-                roots
-                    .iter()
-                    .filter_map(|r| {
-                        let p = PathBuf::from(r.as_str()?);
-                        p.is_dir().then_some(p)
-                    })
-                    .next()
-            })
+        tab_val.get("workspace_roots").and_then(|v| v.as_array()).and_then(|roots| {
+            roots
+                .iter()
+                .filter_map(|r| {
+                    let p = PathBuf::from(r.as_str()?);
+                    p.is_dir().then_some(p)
+                })
+                .next()
+        })
     });
     let shell_profile = shell_profiles::find_profile(req.profile_id.as_deref().or_else(|| {
         source_session.as_ref().and_then(|session| session.shell_profile_id.as_deref())
