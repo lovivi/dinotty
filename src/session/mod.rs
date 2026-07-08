@@ -256,14 +256,15 @@ pub fn remove_pane_from_layout(
                     result["children"] = serde_json::Value::Array(new_children);
                     Some(result)
                 }
-                1 => {
-                    // Single-child split is degenerate — collapse by returning the child directly
-                    Some(new_children.into_iter().next().expect("checked len == 1"))
-                }
                 _ => {
+                    // 1 or more children — keep the split structure and rebalance ratios.
+                    // NOTE: we do NOT collapse single-child splits to a leaf. Doing so would
+                    // change the Vue component tree shape, causing TerminalPane to be
+                    // destroyed & recreated on the frontend (lost terminal state, old
+                    // content still visible, layout flash). Keeping the split wrapper
+                    // ensures the remaining pane's TerminalPane component is preserved.
                     let mut result = node.clone();
                     result["children"] = serde_json::Value::Array(new_children);
-                    // Rebalance ratios evenly
                     let n = result["children"].as_array().expect("just assigned as array").len();
                     #[allow(clippy::cast_precision_loss)]
                     let ratio = 1.0 / n as f64;

@@ -225,9 +225,12 @@ fn remove_pane_keeps_other_leaf() {
 fn remove_pane_from_split_two_panes() {
     let layout = split("horizontal", vec![leaf("p1"), leaf("p2")]);
     let result = remove_pane_from_layout(&layout, "p2").unwrap();
-    // Single-child split collapses to the remaining child
-    assert_eq!(result.get("type").unwrap(), "leaf");
-    assert_eq!(result.get("paneId").unwrap(), "p1");
+    // Single-child split kept as split to preserve Vue component tree.
+    // Frontend ensureSplitRoot wraps it the same way.
+    assert_eq!(result.get("type").unwrap(), "split");
+    let children = result.get("children").unwrap().as_array().unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].get("paneId").unwrap(), "p1");
 }
 
 #[test]
@@ -245,9 +248,12 @@ fn remove_pane_from_split_three_panes() {
 fn remove_pane_from_split_last_pane() {
     let layout = split("horizontal", vec![leaf("p1"), leaf("p2")]);
     let result = remove_pane_from_layout(&layout, "p1");
-    // p1 removed, only p2 left, single-child split collapses to p2
+    // p1 removed, only p2 left — kept as split to preserve Vue component tree
     let result = result.unwrap();
-    assert_eq!(result.get("paneId").unwrap(), "p2");
+    assert_eq!(result.get("type").unwrap(), "split");
+    let children = result.get("children").unwrap().as_array().unwrap();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].get("paneId").unwrap(), "p2");
 }
 
 #[test]
