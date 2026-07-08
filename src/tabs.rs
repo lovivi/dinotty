@@ -238,13 +238,10 @@ pub async fn split_pane(
     // OSC hasn't fired yet on WSL), try the tab's workspace_roots.
     let cwd = source_cwd.or_else(|| {
         tab_val.get("workspace_roots").and_then(|v| v.as_array()).and_then(|roots| {
-            roots
-                .iter()
-                .filter_map(|r| {
-                    let p = PathBuf::from(r.as_str()?);
-                    p.is_dir().then_some(p)
-                })
-                .next()
+            roots.iter().find_map(|r| {
+                let p = PathBuf::from(r.as_str()?);
+                p.is_dir().then_some(p)
+            })
         })
     });
     let shell_profile = shell_profiles::find_profile(req.profile_id.as_deref().or_else(|| {
