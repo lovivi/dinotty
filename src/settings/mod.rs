@@ -582,7 +582,13 @@ fn save_settings(settings: &Settings) -> Result<(), String> {
     let dir = config_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    std::fs::write(settings_path(), json).map_err(|e| e.to_string())?;
+    let path = settings_path();
+    // Atomic write: write to .tmp then rename (crash-safe on ext4/ntfs).
+    // Prevents corrupted settings.json when the process is killed mid-write
+    // during upgrades or shutdown.
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(tmp, path).map_err(|e| e.to_string())?;
     Ok(())
 }
 

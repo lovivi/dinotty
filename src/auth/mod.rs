@@ -43,6 +43,7 @@ pub async fn auth_middleware(
     if path == "/"
         || path == "/api/notify"
         || path == "/api/token-configured"
+        || path == "/api/shell/profiles"
         || path == "/manifest.json"
         || path == "/logo.png"
         || path == "/ws/notify"
