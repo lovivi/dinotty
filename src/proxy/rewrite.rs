@@ -96,7 +96,8 @@ pub fn rewrite_js_imports(js: &str, mode: &RewriteMode) -> String {
     };
     JS_IMPORT_RE
         .replace_all(js, |caps: &regex::Captures| {
-            format!("{}{}{}/{}", &caps[1], &caps[2], &prefix, &caps[3])
+            let (c1, c2, c3) = (&caps[1], &caps[2], &caps[3]);
+            format!("{c1}{c2}{prefix}/{c3}")
         })
         .into_owned()
 }
